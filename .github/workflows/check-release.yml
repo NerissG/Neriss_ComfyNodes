@@ -1,0 +1,92 @@
+name: Check code and release assets
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+      - run: npm install --global pnpm@12.9.0
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run lint
+      - run: pnpm run typecheck
+      - run: pnpm run test
+      # Do not build on disk first: that would hide missing or stale committed files.
+      - run: pnpm run check:release
+
+  python:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: ComfyUI/custom_nodes/Neriss_ComfyNodes
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: Comfy-Org/ComfyUI
+          # The same real Comfy API used by the local regression suite, not main.
+          ref: 8f04fd6ecf4a548937971e840af2a985529fab76
+          path: ComfyUI
+          persist-credentials: false
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          path: ComfyUI/custom_nodes/Neriss_ComfyNodes
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+      - name: Create isolated CPU test environment
+        run: |
+          python -m venv "$RUNNER_TEMP/neriss-python"
+          echo "$RUNNER_TEMP/neriss-python/bin" >> "$GITHUB_PATH"
+          echo "VIRTUAL_ENV=$RUNNER_TEMP/neriss-python" >> "$GITHUB_ENV"
+      - name: Install ComfyUI and pinned check tools
+        run: |
+          python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -r ../../requirements.txt ruff==0.17.1 ty==0.0.90
+      - run: python -m ruff format --check .
+      - run: python -m ruff check .
+      - run: python -m ty check --python "$(command -v python)"
+      - run: python -m unittest discover -s tests -v
+
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+      - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31
+      - run: npm install --global pnpm@12.9.0
+      - run: pnpm install --frozen-lockfile
+      # The runner uses only flake.lock's matching Playwright/Chromium bundle.
+      - run: pnpm run test:e2e
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: browser-test-results
+          path: |
+            web/test-results/
+            web/playwright-report/
+          if-no-files-found: ignore
+          retention-days: 7

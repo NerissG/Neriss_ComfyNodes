@@ -1,0 +1,13 @@
+.github/
+.envrc
+AGENTS.md
+flake.nix
+flake.lock
+tests/
+web/e2e/
+web/preview/
+web/tests/
+web/dev/
+web/node_modules/
+web/test-results/
+web/playwright-report/

@@ -1,0 +1,12 @@
+{
+  "summary": {
+    "caption": "High quality digital photography with sharp focus throughout.\n\nA cat riding a bike, down a steep street."
+  },
+  "items": [
+    { "label": "character", "caption": "large car", "bbox": [-552, -400, 167, 182] },
+    { "label": "object", "caption": "road racing bicycle", "bbox": [-367, -397, 615, 288] },
+    { "label": "object", "caption": "large houses in the background", "bbox": [-672, -544, 185, 93] }
+  ],
+  "bbox_coord_space": "abs_centralized",
+  "bbox_format": "yxyx"
+}

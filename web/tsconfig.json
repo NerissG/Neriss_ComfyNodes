@@ -1,0 +1,30 @@
+{
+  "compilerOptions": {
+    "allowJs": false,
+    "composite": true,
+    "isolatedModules": true,
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "paths": {
+      "@/*": ["./src/*"]
+    },
+    "skipLibCheck": true,
+    "strict": true,
+    "target": "ES2022"
+  },
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.svelte",
+    "src/**/*.d.ts",
+    "vite.config.ts",
+    "vite.dev.config.ts",
+    "vite.preview.config.ts",
+    "playwright.config.ts",
+    "preview/**/*.ts",
+    "preview/**/*.svelte",
+    "e2e/**/*.ts",
+    "scripts/**/*.ts"
+  ]
+}

@@ -1,0 +1,8 @@
+{
+    "summary": { "caption": "test" },
+    "items": [
+        { "label": "object", "caption": "", "palette": ["#FFFFFF"], "bbox": [-256, -160, 160, 225] }
+    ],
+    "bbox_coord_space": "abs_centralized",
+    "bbox_format": "yxyx"
+}

@@ -1,0 +1,16 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /web
+    schedule:
+      interval: weekly
+    # Browser/toolchain upgrades must stay aligned with the pinned Nix bundle.
+    ignore:
+      - dependency-name: "@playwright/test"
+    groups:
+      frontend-tooling:
+        patterns: ["*"]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

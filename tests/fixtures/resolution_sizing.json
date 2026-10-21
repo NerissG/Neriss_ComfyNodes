@@ -1,0 +1,66 @@
+[
+  {
+    "aspect_x": 1,
+    "aspect_y": 1,
+    "target_pixels": 1000000,
+    "multiple": 64,
+    "width": 1024,
+    "height": 1024
+  },
+  {
+    "aspect_x": 7,
+    "aspect_y": 2,
+    "target_pixels": 1000000,
+    "multiple": 64,
+    "width": 1856,
+    "height": 512
+  },
+  {
+    "aspect_x": 3,
+    "aspect_y": 5,
+    "target_pixels": 1000000,
+    "multiple": 64,
+    "width": 768,
+    "height": 1280
+  },
+  {
+    "aspect_x": 1,
+    "aspect_y": 100000,
+    "target_pixels": 1000000,
+    "multiple": 64,
+    "width": 64,
+    "height": 316224
+  },
+  {
+    "aspect_x": 1,
+    "aspect_y": 1,
+    "target_pixels": 25600,
+    "multiple": 64,
+    "width": 128,
+    "height": 128
+  },
+  {
+    "aspect_x": 1,
+    "aspect_y": 1,
+    "target_pixels": 50176,
+    "multiple": 64,
+    "width": 256,
+    "height": 256
+  },
+  {
+    "aspect_x": 16,
+    "aspect_y": 9,
+    "target_pixels": 1048576,
+    "multiple": 16,
+    "width": 1360,
+    "height": 768
+  },
+  {
+    "aspect_x": 1,
+    "aspect_y": 1,
+    "target_pixels": 1,
+    "multiple": 64,
+    "width": 64,
+    "height": 64
+  }
+]

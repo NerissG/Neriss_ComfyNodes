@@ -1,0 +1,55 @@
+[project]
+name = "Neriss_ComfyNodes"
+description = "A handful of ComfyUI nodes to fill in the gaps left by other node pack."
+version = "0.1.0"
+license = {file = "LICENSE"}
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.17.1",
+    "ty>=0.0.90",
+]
+
+[project.urls]
+Repository = "https://github.com/NerissG/Neriss_ComfyNodes"
+"Bug Tracker" = "https://github.com/NerissG/Neriss_ComfyNodes/issues"
+
+[tool.comfy]
+DisplayName = "Neriss ComfyNodes"
+includes = ["web/dist"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+src = ["."]
+exclude = [
+    ".git",
+    ".venv",
+    "__pycache__",
+    "_storage",
+    "web",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "F",
+    "I",
+    "UP",
+    "B",
+    "SIM",
+    "RUF",
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+
+[tool.ty.environment]
+extra-paths = ["../.."]
+
+[tool.ty.src]
+include = ["__init__.py", "nodes", "shared"]
