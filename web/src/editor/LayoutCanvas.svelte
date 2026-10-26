@@ -167,7 +167,10 @@
     onchange({ ...state, selected_region_id: id });
   }
   function cycle(point: Point) {
-    const hits = regions
+    // Cycle in document order, not the paint order that raises the current selection.
+    const hits = state.elements
+      .filter(hasRegionBbox)
+      .filter((region) => regions.includes(region))
       .filter(({ bbox }) => point.y >= bbox[0] && point.x >= bbox[1] && point.y <= bbox[2] && point.x <= bbox[3])
       .reverse();
     if (hits.length)

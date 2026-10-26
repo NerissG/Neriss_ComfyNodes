@@ -41,6 +41,43 @@ async function drawSelectedRegion(page: Page) {
 }
 
 for (const model of ["moss", "ideogram"] satisfies EditorModel[]) {
+  for (const count of [3, 4]) {
+    test(`${model}: modifier-click cycles through all ${count} stacked elements`, async ({ page }) => {
+      await openEditor(page, model, true);
+      const canvas = page.getByRole("application", { name: "Layout canvas" });
+      const frame = await canvas.locator(".canvas-frame").boundingBox();
+      const bounds = await canvas.boundingBox();
+      expect(frame).not.toBeNull();
+      expect(bounds).not.toBeNull();
+      if (!frame || !bounds) return;
+      const position = {
+        x: frame.x - bounds.x + frame.width * 0.4,
+        y: frame.y - bounds.y + frame.height * 0.4,
+      };
+      for (let index = 0; index < count; index += 1) {
+        await page.getByRole("button", { name: "Object", exact: true }).click();
+        await page.mouse.move(frame.x + frame.width * 0.2, frame.y + frame.height * 0.2);
+        await page.mouse.down();
+        await page.mouse.move(frame.x + frame.width * 0.6, frame.y + frame.height * 0.6, { steps: 4 });
+        await page.mouse.up();
+      }
+      const original = await readState(page);
+      const topToBottom = [...original.elements].reverse();
+      for (const modifier of ["Control", "Meta"] satisfies ("Control" | "Meta")[]) {
+        await canvas.click({ position: { x: 100, y: 10 } });
+        expect((await readState(page)).selected_region_id).toBeNull();
+        for (let round = 0; round < 2; round += 1) {
+          for (const region of topToBottom) {
+            await canvas.click({ position, modifiers: [modifier] });
+            expect((await readState(page)).selected_region_id).toBe(region.id);
+            await expect(canvas.locator(".region").last()).toHaveAttribute("aria-pressed", "true");
+          }
+        }
+      }
+      expect((await readState(page)).elements).toEqual(original.elements);
+    });
+  }
+
   test(`${model}: customized shortcuts persist, update hints and stay out of text fields`, async ({
     page,
   }, testInfo) => {
