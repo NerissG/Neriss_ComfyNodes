@@ -155,7 +155,6 @@
     persist(next);
     checkedIds = [];
     hoveredId = null;
-    if (!state.selected_region_id) focused = false;
     setNotice(`Deleted ${count} ${count === 1 ? "region" : "regions"}. Use Undo to restore.`);
   }
   function openEditor(event: Event) {
@@ -378,7 +377,7 @@
         remove(checkedIds.length ? checkedIds : state.selected_region_id ? [state.selected_region_id] : []);
         break;
       case "view.focus":
-        if (state.selected_region_id || focused) focused = !focused;
+        focused = !focused;
         break;
       case "view.fitCanvas":
         canvas?.fitCanvas();

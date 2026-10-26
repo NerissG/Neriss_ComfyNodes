@@ -81,6 +81,7 @@ function binding(key: string, ...modifiers: Modifier[]): KeyBinding {
 
 export const shortcutCommands: ShortcutCommand[] = [
   { id: "tool.select", label: "Select tool", category: "Tools", scope: "editor", defaults: [binding("v")] },
+  { id: "tool.pan", label: "Pan tool", category: "Tools", scope: "editor", defaults: [binding("h")] },
   { id: "tool.object", label: "Object tool", category: "Tools", scope: "editor", defaults: [binding("o")] },
   {
     id: "tool.character",
@@ -91,7 +92,6 @@ export const shortcutCommands: ShortcutCommand[] = [
     model: "moss",
   },
   { id: "tool.text", label: "Text tool", category: "Tools", scope: "editor", defaults: [binding("t")] },
-  { id: "tool.pan", label: "Pan tool", category: "Tools", scope: "editor", defaults: [binding("h")] },
   {
     id: "history.undo",
     label: "Undo",

@@ -659,6 +659,12 @@ test("Focus isolates boxes, selection zoom is explicit, and labels stay unclutte
   await page.getByRole("button", { name: "Show boxes", exact: true }).click();
   await page.getByRole("button", { name: "Focus", exact: true }).click();
   await expect(page.locator("svg .region")).toHaveCount(9);
+  await page.keyboard.press("Escape");
+  expect((await readState(page)).selected_region_id).toBeNull();
+  await page.getByRole("button", { name: "Focus", exact: true }).click();
+  await expect(page.locator("svg .region")).toHaveCount(0);
+  await page.locator(".region-item .region-select").first().click();
+  await expect(page.locator("svg .region")).toHaveCount(1);
 });
 
 test("drawing returns to Select; moving is one undo step and Escape cancels a drag", async ({ page }) => {

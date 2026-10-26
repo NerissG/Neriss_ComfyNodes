@@ -63,7 +63,7 @@
   $: frame = { ...fitted, x: fitted.x + 128, y: fitted.y + 32 };
   $: selected = state.elements.find((region) => region.id === state.selected_region_id);
   $: ordered = selected ? [...state.elements.filter((region) => region.id !== selected.id), selected] : state.elements;
-  $: regions = (!overlays ? [] : focused && selected ? [selected] : ordered).filter(hasRegionBbox);
+  $: regions = (!overlays ? [] : focused ? (selected ? [selected] : []) : ordered).filter(hasRegionBbox);
   $: draft = interaction?.type === "draw" ? bboxFromPoints(interaction.start, interaction.current) : null;
   $: drawing = tool === "obj" || tool === "character" || tool === "text" || tool === "redraw";
 
@@ -380,7 +380,6 @@
           aria-pressed={focused}
           aria-label="Focus"
           aria-keyshortcuts={shortcutLabel("view.focus", shortcuts, true) || undefined}
-          disabled={!selected && !focused}
           onclick={() => (focused = !focused)}
           ><svg viewBox="0 0 24 24" aria-hidden="true"
             ><circle cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="2.5" /></svg
