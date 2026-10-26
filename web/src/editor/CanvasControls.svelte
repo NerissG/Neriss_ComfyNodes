@@ -155,7 +155,9 @@
         }}
         ><option value="" disabled>{loadingPresets ? "Loading your presets…" : "Custom"}</option
         >{#each presets as preset (preset.name)}<option value={preset.name}
-            >{preset.name} · {preset.x}:{preset.y}</option
+            >{preset.name === `${preset.x}:${preset.y}`
+              ? preset.name
+              : `${preset.name} · ${preset.x}:${preset.y}`}</option
           >{/each}</select
       ></label
     >

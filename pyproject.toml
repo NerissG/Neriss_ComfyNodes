@@ -1,7 +1,7 @@
 [project]
 name = "Neriss_ComfyNodes"
 description = "A handful of ComfyUI nodes to fill in the gaps left by other node pack."
-version = "0.1.0"
+version = "0.1.1"
 license = {file = "LICENSE"}
 requires-python = ">=3.10"
 dependencies = []

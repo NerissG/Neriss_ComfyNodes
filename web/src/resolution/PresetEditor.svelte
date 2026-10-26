@@ -52,6 +52,7 @@
     dialog.querySelector<HTMLInputElement>(`input[aria-label="Preset ${drafts.length} name"]`)?.focus();
   }
   let drafts: (ResolutionPreset & { id: string })[] = [];
+  let saved: ResolutionPreset[] = [];
   let loading = true;
   let saving = false;
   let error = "";
@@ -60,6 +61,14 @@
   let announcement = "";
   let draggingId: string | null = null;
   let dropTarget: { id: string; after: boolean } | null = null;
+  const presetName = ({ name, x, y }: ResolutionPreset): string => name.trim() || `${x}:${y}`;
+  $: entries = drafts.map((draft) => ({ name: presetName(draft), x: draft.x, y: draft.y }));
+  $: dirty = JSON.stringify(entries) !== JSON.stringify(saved);
+  $: duplicates = new Set(
+    entries
+      .filter((entry, index) => entries.findIndex((other) => other.name === entry.name) !== index)
+      .map((entry) => entry.name),
+  );
   async function load(retry = false) {
     loading = true;
     error = "";
@@ -68,6 +77,7 @@
     loading = false;
     if (result.isErr()) error = formatAppError(result.error);
     else {
+      saved = result.value;
       drafts = result.value.map((preset) => ({ ...preset, id: crypto.randomUUID() }));
       conflict = false;
       confirmReload = false;
@@ -77,7 +87,7 @@
     if (saving || loading || conflict || !drafts.length) return;
     saving = true;
     error = "";
-    const result = await presetLibrary.save(drafts.map(({ name, x, y }) => ({ name: name.trim(), x, y })));
+    const result = await presetLibrary.save(entries);
     if (!mounted) return;
     saving = false;
     if (result.isErr()) {
@@ -93,9 +103,21 @@
     if (!preset) return;
     next.splice(target, 0, preset);
     drafts = next;
-    announcement = `${preset.name || "Untitled preset"} moved to position ${target + 1} of ${drafts.length}.`;
+    announcement = `${presetName(preset)} moved to position ${target + 1} of ${drafts.length}.`;
     await tick();
     if (focused instanceof HTMLElement && focused.isConnected) focused.focus({ preventScroll: true });
+  }
+  function swap(index: number) {
+    drafts = drafts.map((draft, position) =>
+      position === index
+        ? {
+            ...draft,
+            name: draft.name.trim() === `${draft.x}:${draft.y}` ? `${draft.y}:${draft.x}` : draft.name,
+            x: draft.y,
+            y: draft.x,
+          }
+        : draft,
+    );
   }
   function dragOver(event: DragEvent, id: string) {
     if (!draggingId || saving) return;
@@ -140,12 +162,35 @@
     <header>
       <div>
         <h2>Aspect-ratio presets</h2>
-        <p>Shared with Resolution Selector. Drag to reorder, or use the arrow buttons.</p>
+        <p>Shared with Resolution Selector</p>
       </div>
-      <button type="button" class="quiet" aria-label="Close preset manager" disabled={saving} onclick={oncancel}
-        >×</button
-      >
+      <div class="button-row">
+        {#if dirty}<span class="status">Unsaved changes</span>{/if}
+        <button type="button" class="quiet" disabled={saving} onclick={oncancel}>Cancel</button>
+        <button type="submit" class="save-presets" disabled={saving || loading || conflict || !drafts.length}
+          >{saving ? "Saving…" : "Save presets"}</button
+        >
+      </div>
     </header>
+    {#if (error && drafts.length) || conflict}
+      <div class="feedback">
+        {#if error && drafts.length}<p class="field-error" role="alert">{error}</p>{/if}
+        {#if conflict}
+          <p>Your draft has not been saved or replaced. Reload the latest presets before saving again.</p>
+          {#if confirmReload}
+            <p>Reloading discards this draft and replaces it with the server's latest presets.</p>
+            <div class="button-row">
+              <button type="button" disabled={loading} onclick={() => (confirmReload = false)}>Keep draft</button>
+              <button type="button" disabled={loading} onclick={() => void load(true)}
+                >{loading ? "Reloading…" : "Discard draft and reload"}</button
+              >
+            </div>
+          {:else}
+            <button type="button" onclick={() => (confirmReload = true)}>Reload latest presets</button>
+          {/if}
+        {/if}
+      </div>
+    {/if}
     <div class="preset-rows" role="group" aria-label="Presets" aria-disabled={saving} aria-busy={loading}>
       {#if loading}
         <p role="status">Loading your presets…</p>
@@ -153,9 +198,6 @@
         <p class="field-error" role="alert">{error}</p>
         <button type="button" onclick={() => void load(true)}>Retry loading presets</button>
       {:else}
-        <div class="column-labels" aria-hidden="true">
-          <span></span><span>Name</span><span>Width</span><span>Height</span><span>Order / remove</span>
-        </div>
         {#each drafts as draft, index (draft.id)}
           <div
             class="preset-draft"
@@ -195,17 +237,22 @@
                 void move(index, index + (event.key === "ArrowUp" ? -1 : 1));
               }}>⠿</button
             >
-            <label
-              ><span class="mobile-label">Name</span><input
-                aria-label={`Preset ${index + 1} name`}
-                bind:value={draft.name}
-                placeholder="Preset name"
-                required
-                disabled={saving}
-              /></label
+            <span class="ratio-shape" aria-hidden="true"
+              ><span
+                style:width={`${(18 * draft.x) / Math.max(draft.x, draft.y)}px`}
+                style:height={`${(18 * draft.y) / Math.max(draft.x, draft.y)}px`}
+              ></span></span
             >
-            <label
-              ><span class="mobile-label">Width</span><input
+            <input
+              aria-label={`Preset ${index + 1} name`}
+              aria-invalid={duplicates.has(presetName(draft))}
+              title={duplicates.has(presetName(draft)) ? "Another preset has this name" : undefined}
+              bind:value={draft.name}
+              placeholder={`${draft.x}:${draft.y}`}
+              disabled={saving}
+            />
+            <div class="ratio">
+              <input
                 type="number"
                 aria-label={`Preset ${index + 1} width`}
                 bind:value={draft.x}
@@ -214,10 +261,7 @@
                 step="1"
                 required
                 disabled={saving}
-              /></label
-            >
-            <label
-              ><span class="mobile-label">Height</span><input
+              /><span aria-hidden="true">:</span><input
                 type="number"
                 aria-label={`Preset ${index + 1} height`}
                 bind:value={draft.y}
@@ -226,71 +270,47 @@
                 step="1"
                 required
                 disabled={saving}
-              /></label
-            >
-            <div class="row-actions">
-              <button
-                type="button"
-                class="quiet"
-                disabled={saving || index === 0}
-                aria-label={`Move preset ${index + 1} up`}
-                onclick={() => move(index, index - 1)}>↑</button
-              >
-              <button
-                type="button"
-                class="quiet"
-                disabled={saving || index === drafts.length - 1}
-                aria-label={`Move preset ${index + 1} down`}
-                onclick={() => move(index, index + 1)}>↓</button
-              >
-              <button
-                type="button"
-                class="quiet danger"
-                disabled={saving || drafts.length === 1}
-                aria-label={`Delete preset ${index + 1}`}
-                onclick={() => (drafts = drafts.filter((_, position) => position !== index))}>×</button
-              >
+              />
             </div>
+            <button
+              type="button"
+              class="quiet icon-button"
+              disabled={saving || draft.x === draft.y}
+              aria-label={`Swap preset ${index + 1} orientation`}
+              title="Swap orientation"
+              onclick={() => swap(index)}
+              ><svg viewBox="0 0 24 24" aria-hidden="true"
+                ><path d="M7 4v16m0 0-3-3m3 3 3-3M17 20V4m0 0-3 3m3-3 3 3" /></svg
+              ></button
+            >
+            <button
+              type="button"
+              class="quiet icon-button delete"
+              disabled={saving || drafts.length === 1}
+              aria-label={`Delete preset ${index + 1}`}
+              title="Delete preset"
+              onclick={() => (drafts = drafts.filter((_, position) => position !== index))}
+              ><svg viewBox="0 0 24 24" aria-hidden="true"
+                ><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" /></svg
+              ></button
+            >
           </div>
         {/each}
       {/if}
     </div>
+    {#if drafts.length}
+      <button type="button" class="add-preset" disabled={saving || loading} onclick={add}
+        ><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>Add preset</button
+      >
+    {/if}
     <p class="sr-only" role="status" aria-live="polite">{announcement}</p>
-    <footer>
-      {#if error && drafts.length}<p class="field-error" role="alert">{error}</p>{/if}
-      {#if conflict}
-        <div class="conflict-recovery">
-          <p>Your draft has not been saved or replaced. Reload the latest presets before saving again.</p>
-          {#if confirmReload}
-            <p>Reloading discards this draft and replaces it with the server's latest presets.</p>
-            <div class="button-row">
-              <button type="button" disabled={loading} onclick={() => (confirmReload = false)}>Keep draft</button>
-              <button type="button" disabled={loading} onclick={() => void load(true)}
-                >{loading ? "Reloading…" : "Discard draft and reload"}</button
-              >
-            </div>
-          {:else}
-            <button type="button" onclick={() => (confirmReload = true)}>Reload latest presets</button>
-          {/if}
-        </div>
-      {/if}
-      <div class="actions">
-        <button type="button" disabled={saving || loading || !drafts.length} onclick={add}>Add preset</button>
-        <div class="button-row">
-          <button type="button" class="quiet" disabled={saving} onclick={oncancel}>Cancel</button>
-          <button type="submit" class="save-presets" disabled={saving || loading || conflict || !drafts.length}
-            >{saving ? "Saving…" : "Save presets"}</button
-          >
-        </div>
-      </div>
-    </footer>
   </form>
 </dialog>
 
 <style>
   .preset-modal {
     pointer-events: auto;
-    width: min(760px, calc(100vw - 32px));
+    width: min(600px, calc(100vw - 32px));
     max-width: none;
     max-height: calc(100dvh - 32px);
     margin: auto;
@@ -310,54 +330,75 @@
     max-height: min(720px, calc(100dvh - 36px));
   }
   header,
-  footer {
+  .feedback {
     flex-shrink: 0;
-    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
   }
   header {
     display: flex;
+    flex-wrap: wrap;
     justify-content: space-between;
-    align-items: start;
-    gap: 16px;
-    border-bottom: 1px solid var(--border);
+    align-items: center;
+    gap: 12px;
+    padding: 14px 16px 14px 20px;
   }
   header h2 {
     font-size: 16px;
     margin: 0;
   }
   header p {
-    margin: 4px 0 0;
+    margin: 2px 0 0;
     font-size: 12px;
     color: var(--muted);
   }
-  header button {
-    font-size: 20px;
-    line-height: 1;
+  header .button-row {
+    margin-left: auto;
+  }
+  .status {
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .preset-modal .save-presets {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-ink);
+    font-weight: 500;
+  }
+  .preset-modal .save-presets:hover {
+    filter: brightness(1.08);
+  }
+  .feedback {
+    padding: 10px 20px;
+    font-size: 12px;
+  }
+  .feedback p {
+    margin: 0 0 8px;
+    color: var(--muted);
+  }
+  .feedback .field-error {
+    color: var(--danger);
+  }
+  .feedback .button-row {
+    flex-wrap: wrap;
   }
   .preset-rows {
-    border: 0;
-    margin: 0;
-    padding: 12px 20px;
+    padding: 8px 12px 0;
     min-width: 0;
     min-height: 0;
     overflow-y: auto;
     overscroll-behavior: contain;
   }
-  .column-labels,
-  .preset-draft {
-    display: grid;
-    grid-template-columns: 28px minmax(100px, 1fr) 88px 88px 108px;
-    gap: 10px;
-    align-items: center;
-  }
-  .column-labels {
-    padding-bottom: 8px;
-    color: var(--muted);
-    font-size: 12px;
-  }
   .preset-draft {
     position: relative;
-    padding: 5px 0;
+    display: grid;
+    grid-template-columns: 20px 24px minmax(0, 1fr) auto 28px 28px;
+    gap: 8px;
+    align-items: center;
+    padding: 4px 6px;
+    border-radius: 8px;
+  }
+  .preset-draft:is(:hover, :focus-within) {
+    background: var(--surface-2);
   }
   .preset-draft.dragging {
     opacity: 0.45;
@@ -380,12 +421,102 @@
   }
   .preset-modal .drag-handle {
     cursor: grab;
-    padding: 6px 2px;
-    font-size: 20px;
+    padding: 4px 0;
+    font-size: 16px;
+    color: var(--placeholder);
+  }
+  .preset-draft:hover .drag-handle {
     color: var(--muted);
   }
   .drag-handle:active {
     cursor: grabbing;
+  }
+  .ratio-shape {
+    display: grid;
+    place-items: center;
+    height: 24px;
+  }
+  .ratio-shape span {
+    min-width: 3px;
+    min-height: 3px;
+    border: 1.5px solid var(--accent-line);
+    border-radius: 2px;
+    background: var(--accent-bg);
+  }
+  .preset-draft input {
+    padding: 5px 8px;
+    background: transparent;
+    border-color: transparent;
+  }
+  .preset-draft:is(:hover, :focus-within) input {
+    background: var(--field);
+    border-color: var(--border);
+  }
+  .preset-draft input[aria-invalid="true"] {
+    border-color: var(--danger);
+  }
+  .ratio {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    color: var(--placeholder);
+  }
+  .ratio input {
+    width: 56px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+    appearance: textfield;
+  }
+  .ratio input::-webkit-inner-spin-button {
+    appearance: none;
+    margin: 0;
+  }
+  .preset-modal .icon-button {
+    display: inline-flex;
+    justify-content: center;
+    align-items: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    color: var(--muted);
+    opacity: 0;
+  }
+  .preset-draft:is(:hover, :focus-within) .icon-button {
+    opacity: 1;
+  }
+  .preset-draft:is(:hover, :focus-within) .icon-button:disabled {
+    opacity: 0.38;
+  }
+  .preset-modal .icon-button:hover {
+    color: var(--text);
+  }
+  .preset-modal .delete:hover {
+    color: var(--danger);
+  }
+  svg {
+    width: 15px;
+    height: 15px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.7;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    flex-shrink: 0;
+  }
+  .preset-modal .add-preset {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+    margin: 6px 18px 16px;
+    padding: 8px 12px;
+    border-style: dashed;
+    background: transparent;
+    color: var(--muted);
+  }
+  .preset-modal .add-preset:hover {
+    background: var(--accent-bg);
+    color: var(--accent);
   }
   .sr-only {
     position: absolute;
@@ -396,67 +527,35 @@
     clip-path: inset(50%);
     white-space: nowrap;
   }
-  .preset-draft label {
-    margin: 0;
-    min-width: 0;
-  }
-  .mobile-label {
-    display: none;
-  }
-  .row-actions {
-    display: flex;
-    gap: 3px;
-  }
-  .row-actions button {
-    width: 34px;
-    padding: 6px;
-  }
-  footer {
-    border-top: 1px solid var(--border);
-  }
-  .conflict-recovery {
-    margin-bottom: 12px;
-  }
-  .conflict-recovery p {
-    margin: 0 0 8px;
-    color: var(--muted);
-  }
-  .conflict-recovery .button-row {
-    flex-wrap: wrap;
-  }
-  .actions {
-    display: flex;
-    justify-content: space-between;
-    gap: 10px;
-  }
-  .preset-modal .save-presets {
-    background: var(--accent-bg);
-    border-color: var(--accent-line);
-    color: var(--accent);
+  @media (hover: none) {
+    .preset-modal .icon-button {
+      opacity: 1;
+    }
+    .preset-modal .icon-button:disabled {
+      opacity: 0.38;
+    }
   }
   @media (max-width: 560px) {
-    header,
-    footer {
+    header {
       padding: 12px;
     }
-    .preset-rows {
-      padding: 8px 12px;
+    .feedback {
+      padding: 10px 12px;
     }
-    .column-labels {
-      display: none;
+    .preset-rows {
+      padding: 6px 6px 0;
     }
     .preset-draft {
-      grid-template-columns: 24px minmax(60px, 1fr) 56px 56px;
-      gap: 6px;
-      border-bottom: 1px solid var(--border);
-      padding: 10px 0;
+      grid-template-columns: 16px 20px minmax(0, 1fr) auto 28px 28px;
+      gap: 4px;
+      padding: 4px;
     }
-    .mobile-label {
-      display: block;
+    .ratio input {
+      width: 44px;
+      padding: 5px 4px;
     }
-    .row-actions {
-      grid-column: 1 / -1;
-      justify-content: end;
+    .preset-modal .add-preset {
+      margin: 6px 10px 12px;
     }
   }
 </style>

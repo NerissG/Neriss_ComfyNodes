@@ -1404,7 +1404,7 @@ test("AR presets can be edited and saved from Canvas, with failed saves retainin
   await page.getByRole("button", { name: "Add preset", exact: true }).click();
   await page.getByRole("textbox", { name: "Preset 2 name", exact: true }).fill("New portrait");
   await page.getByRole("spinbutton", { name: "Preset 2 height", exact: true }).fill("2");
-  await page.getByRole("button", { name: "Move preset 2 up", exact: true }).click();
+  await page.getByRole("button", { name: "Drag to reorder preset 2", exact: true }).press("ArrowUp");
   await page.getByRole("button", { name: "Save presets", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("Could not save presets");
   await expect(page.getByRole("textbox", { name: "Preset 1 name", exact: true })).toHaveValue("New portrait");
@@ -1430,10 +1430,10 @@ test("preset management is a modal with contained keyboard focus and cancel rest
   await expect(modal).toBeVisible();
   expect(await modal.evaluate((element) => element.matches(":modal"))).toBe(true);
   expect(await ratio.boundingBox()).toEqual(before);
-  const close = modal.getByRole("button", { name: "Close preset manager", exact: true });
-  await close.focus();
+  await expect(modal.getByRole("textbox", { name: "Preset 1 name", exact: true })).toHaveValue("My banner");
+  await modal.getByRole("button", { name: "Cancel", exact: true }).focus();
   await page.keyboard.press("Shift+Tab");
-  await expect(modal.getByRole("button", { name: "Save presets", exact: true })).toBeFocused();
+  await expect(modal.getByRole("button", { name: "Add preset", exact: true })).toBeFocused();
   await page.keyboard.press("Delete");
   expect((await readState(page)).elements).toEqual(state.elements);
   await modal.getByRole("textbox", { name: "Preset 1 name", exact: true }).fill("Discard this draft");
@@ -1481,8 +1481,8 @@ test("long preset lists scroll inside the modal with actions visible on desktop 
   for (let index = 1; index < rowBoxes.length; index += 1)
     expect(rowBoxes[index].top).toBeGreaterThanOrEqual(rowBoxes[index - 1].bottom);
   const listBounds = await rows.boundingBox();
-  const footerBounds = await modal.locator("footer").boundingBox();
-  if (listBounds && footerBounds) expect(listBounds.y + listBounds.height).toBeLessThanOrEqual(footerBounds.y + 1);
+  const addBounds = await modal.getByRole("button", { name: "Add preset", exact: true }).boundingBox();
+  if (listBounds && addBounds) expect(listBounds.y + listBounds.height).toBeLessThanOrEqual(addBounds.y + 1);
   await page.screenshot({ path: testInfo.outputPath("preset-modal-mobile.png") });
 });
 
@@ -1511,7 +1511,7 @@ test("preset drag ordering stays a draft, saves globally, and applying a ratio r
   await modal.getByRole("textbox", { name: "Preset 1 name", exact: true }).fill("Edited banner");
   await modal
     .getByRole("button", { name: "Drag to reorder preset 1", exact: true })
-    .dragTo(modal.getByRole("group", { name: "Preset 3", exact: true }), { targetPosition: { x: 100, y: 44 } });
+    .dragTo(modal.getByRole("group", { name: "Preset 3", exact: true }), { targetPosition: { x: 100, y: 32 } });
   await expect(modal.getByRole("textbox", { name: "Preset 3 name", exact: true })).toHaveValue("Edited banner");
   await modal.getByRole("button", { name: "Cancel", exact: true }).click();
   expect(saves).toBe(0);
@@ -1561,11 +1561,12 @@ test("the standalone preset manager uses the editor theme and publishes changes 
   const modal = page.getByRole("dialog", { name: "Manage aspect-ratio presets", exact: true });
   await expect(modal).toHaveCSS("background-color", "rgb(27, 27, 27)");
   const name = modal.getByRole("textbox", { name: "Preset 1 name", exact: true });
+  await name.focus();
   await expect(name).toHaveCSS("background-color", "rgb(22, 22, 22)");
   await expect(name).toHaveCSS("color", "rgb(228, 228, 228)");
   await expect(modal.getByRole("button", { name: "Save presets", exact: true })).toHaveCSS(
     "background-color",
-    "rgb(40, 48, 41)",
+    "rgb(168, 199, 174)",
   );
   await name.fill("New ratio");
   await page.screenshot({ path: testInfo.outputPath("standalone-preset-manager.png") });
@@ -1579,6 +1580,47 @@ test("the standalone preset manager uses the editor theme and publishes changes 
   await expect(page.getByRole("combobox", { name: "Aspect ratio", exact: true }).locator("option")).toHaveText([
     "Custom",
     "New ratio · 7:2",
+  ]);
+});
+
+test("preset names default to their ratio and swapping flips ratio names", async ({ page }) => {
+  let presets = [{ name: "3:4", x: 3, y: 4 }];
+  await page.route("**/neriss_comfynodes/resolution/presets", async (route) => {
+    if (route.request().method() === "POST") {
+      const payload: unknown = route.request().postDataJSON();
+      presets = z.object({ presets: z.array(resolutionPresetSchema) }).parse(payload).presets;
+    }
+    await route.fulfill({ json: { presets } });
+  });
+  await page.goto("/preview/index.html?manager=1");
+  const modal = page.getByRole("dialog", { name: "Manage aspect-ratio presets", exact: true });
+  const first = modal.getByRole("textbox", { name: "Preset 1 name", exact: true });
+  await expect(first).toHaveValue("3:4");
+  await expect(modal.getByText("Unsaved changes")).toHaveCount(0);
+  await modal.getByRole("button", { name: "Swap preset 1 orientation", exact: true }).click();
+  await expect(first).toHaveValue("4:3");
+  await expect(modal.getByText("Unsaved changes")).toBeVisible();
+  await modal.getByRole("button", { name: "Add preset", exact: true }).click();
+  const second = modal.getByRole("textbox", { name: "Preset 2 name", exact: true });
+  await second.fill("4:3");
+  await expect(second).toHaveAttribute("aria-invalid", "true");
+  await second.fill("");
+  await modal.getByRole("spinbutton", { name: "Preset 2 width", exact: true }).fill("16");
+  await modal.getByRole("spinbutton", { name: "Preset 2 height", exact: true }).fill("9");
+  await expect(second).toHaveAttribute("placeholder", "16:9");
+  await expect(second).toHaveAttribute("aria-invalid", "false");
+  await modal.getByRole("button", { name: "Save presets", exact: true }).click();
+  await expect(modal).toHaveCount(0);
+  expect(presets).toEqual([
+    { name: "4:3", x: 4, y: 3 },
+    { name: "16:9", x: 16, y: 9 },
+  ]);
+  await page.getByRole("button", { name: "Open MOSS editor", exact: true }).click();
+  await page.getByRole("button", { name: "Canvas", exact: true }).click();
+  await expect(page.getByRole("combobox", { name: "Aspect ratio", exact: true }).locator("option")).toHaveText([
+    "Custom",
+    "4:3",
+    "16:9",
   ]);
 });
 
