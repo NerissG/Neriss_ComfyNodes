@@ -32,10 +32,14 @@
       event.stopPropagation();
     });
     const keyup = on(dialog, "keyup", (event) => event.stopPropagation());
+    const removeInputListeners = ["keypress", "paste", "copy", "cut"].map((type) =>
+      on(dialog, type, (event) => event.stopPropagation()),
+    );
     return () => {
       mounted = false;
       keydown();
       keyup();
+      for (const remove of removeInputListeners) remove();
       dialog.close();
       void tick().then(() => {
         if (opener instanceof HTMLElement && opener.isConnected) opener.focus({ preventScroll: true });

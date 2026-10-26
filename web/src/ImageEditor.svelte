@@ -317,7 +317,7 @@
       (target instanceof HTMLElement && target.isContentEditable)
     );
   }
-  function keyboard(event: KeyboardEvent) {
+  function keyboard(event: KeyboardEvent, target = event.target) {
     if (event.defaultPrevented || event.isComposing || showSettings) return;
     if (invalidState !== null) {
       if (event.key === "Escape") {
@@ -337,8 +337,8 @@
         return;
       }
       if (canvas?.cancelInteraction()) return;
-      if (textTarget(event.target) && event.target instanceof HTMLElement) {
-        event.target.blur();
+      if (textTarget(target) && target instanceof HTMLElement) {
+        target.blur();
         return;
       }
       if (focused) {
@@ -352,7 +352,7 @@
       closeEditor();
       return;
     }
-    if (textTarget(event.target) || showJson) return;
+    if (textTarget(target) || showJson) return;
     const command = matchShortcut(event, shortcuts, "editor", model);
     if (!command) return;
     event.preventDefault();
@@ -393,9 +393,16 @@
     }
   }
   function isolateKeyboard(element: HTMLElement) {
-    void tick().then(() => element.focus());
-    const keydown = (event: KeyboardEvent) => {
-      keyboard(event);
+    void tick().then(() => {
+      if (node && element.isConnected) element.focus({ preventScroll: true });
+    });
+    // Preset management is mounted beside the editor, while settings is nested
+    // inside it. Both native modals must keep ownership of focus and Escape.
+    const activeModal = () => document.querySelector<HTMLDialogElement>("dialog.neriss-editor-theme:modal");
+    const inside = (event: Event) => event.target instanceof Node && (activeModal() ?? element).contains(event.target);
+    const stopPropagation = (event: Event) => event.stopPropagation();
+    const keydown = (event: KeyboardEvent, target = event.target) => {
+      keyboard(event, target);
       // Trap tab navigation inside the full-screen editor while retaining native field editing.
       if (event.key === "Tab" && !event.defaultPrevented) {
         const scope = element.querySelector<HTMLElement>(".text-field.expanded, .json-preview") ?? element;
@@ -412,14 +419,43 @@
         ) {
           event.preventDefault();
           last?.focus();
-        } else if (!event.shiftKey && (document.activeElement === last || !scope.contains(document.activeElement))) {
+        } else if (
+          !event.shiftKey &&
+          (document.activeElement === last ||
+            !scope.contains(document.activeElement) ||
+            document.activeElement === element)
+        ) {
           event.preventDefault();
           first?.focus();
         }
       }
       event.stopPropagation();
     };
-    const keyup = (event: KeyboardEvent) => event.stopPropagation();
+    // The host can restore graph focus or dispatch events outside the overlay.
+    // Capture those before document-level graph handlers without intercepting
+    // events inside the editor: its controls must retain native editing behavior.
+    const captureKeyboard = (event: KeyboardEvent) => {
+      if (!node || inside(event)) return;
+      const modal = activeModal();
+      if (modal) {
+        modal.focus({ preventScroll: true });
+        event.stopImmediatePropagation();
+        return;
+      }
+      element.focus({ preventScroll: true });
+      if (event.type === "keydown") keydown(event, element);
+      const nativePaste =
+        event.type === "keydown" &&
+        (((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "v") ||
+          (event.shiftKey && event.key === "Insert"));
+      if (!nativePaste) event.preventDefault();
+      event.stopImmediatePropagation();
+    };
+    const captureFocus = (event: FocusEvent) => {
+      if (!node || inside(event)) return;
+      event.stopImmediatePropagation();
+      (activeModal() ?? element).focus({ preventScroll: true });
+    };
     const focusin = (event: FocusEvent) => {
       editGroup = textTarget(event.target) ? `field-${++focusCounter}` : null;
     };
@@ -427,26 +463,40 @@
       editGroup = null;
     };
     const paste = (event: ClipboardEvent) => {
-      if (textTarget(event.target)) return;
+      if (!node || (inside(event) && textTarget(event.target))) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (invalidState !== null || activeModal() || showJson) return;
       const file = Array.from(event.clipboardData?.files ?? []).find((item) => item.type.startsWith("image/"));
-      if (file) {
-        event.preventDefault();
-        void loadReference(file);
-      }
-      event.stopPropagation();
+      if (file) void loadReference(file);
     };
-    const removeKeydown = on(element, "keydown", keydown);
-    const removeKeyup = on(element, "keyup", keyup);
+    const captureClipboard = (event: ClipboardEvent) => {
+      if (!node || inside(event)) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    };
+    const removeListeners = [
+      on(element, "keydown", (event) => keydown(event)),
+      on(element, "keyup", stopPropagation),
+      on(element, "keypress", stopPropagation),
+      on(element, "paste", stopPropagation),
+      on(element, "copy", stopPropagation),
+      on(element, "cut", stopPropagation),
+      on(window, "keydown", captureKeyboard, { capture: true }),
+      on(window, "keyup", captureKeyboard, { capture: true }),
+      on(window, "keypress", captureKeyboard, { capture: true }),
+      on(window, "focusin", captureFocus, { capture: true }),
+      on(window, "paste", paste, { capture: true }),
+      on(window, "copy", captureClipboard, { capture: true }),
+      on(window, "cut", captureClipboard, { capture: true }),
+    ];
     element.addEventListener("focusin", focusin);
     element.addEventListener("focusout", focusout);
-    element.addEventListener("paste", paste);
     return {
       destroy() {
-        removeKeydown();
-        removeKeyup();
+        for (const remove of removeListeners) remove();
         element.removeEventListener("focusin", focusin);
         element.removeEventListener("focusout", focusout);
-        element.removeEventListener("paste", paste);
       },
     };
   }

@@ -834,7 +834,107 @@ test("reference uploads and image matching preserve the exact source ratio", asy
   expect((await readState(page)).width).toBe(1024);
 });
 
-test("pasting an image automatically matches the canvas and is one undo step", async ({ page }) => {
+test("the open editor captures background shortcuts and image paste, then releases them on close", async ({ page }) => {
+  await page.addInitScript(() => {
+    for (const type of ["keydown", "keyup", "keypress", "paste", "copy", "cut"]) {
+      document.addEventListener(type, () => {
+        const root = document.documentElement;
+        root.dataset.hostEvents = `${root.dataset.hostEvents ?? ""}${type},`;
+      });
+    }
+  });
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="913" height="607"/>';
+  let uploads = 0;
+  await page.route("**/neriss_comfynodes/editor/reference_image**", (route) => {
+    if (route.request().method() === "POST") uploads += 1;
+    return route.fulfill(
+      route.request().method() === "POST"
+        ? { json: { path: "captured.svg", name: "captured.svg", width: 913, height: 607 } }
+        : { contentType: "image/svg+xml", body: svg },
+    );
+  });
+  await openEditor(page);
+  await page.evaluate(() => {
+    const graph = document.createElement("canvas");
+    graph.id = "graph-canvas";
+    graph.tabIndex = 0;
+    document.body.append(graph);
+    graph.focus();
+  });
+  await expect(page.getByRole("dialog")).toBeFocused();
+  // Events can still target the graph after a host handler or an async focus change.
+  await page.locator("#graph-canvas").dispatchEvent("keydown", { key: "o", bubbles: true, cancelable: true });
+  await expect(page.getByRole("button", { name: "Object", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await page.locator("#graph-canvas").dispatchEvent("keyup", { key: "o", bubbles: true, cancelable: true });
+  await page.locator("#graph-canvas").dispatchEvent("keypress", { key: "o", bubbles: true, cancelable: true });
+  await page.locator("#graph-canvas").evaluate((element, image) => {
+    const clipboard = new DataTransfer();
+    clipboard.items.add(new File([image], "captured.svg", { type: "image/svg+xml" }));
+    element.dispatchEvent(new ClipboardEvent("paste", { clipboardData: clipboard, bubbles: true, cancelable: true }));
+  }, svg);
+  await expect.poll(async () => (await readState(page)).reference_image_path).toBe("captured.svg");
+  expect(uploads).toBe(1);
+  expect((await readState(page)).elements).toHaveLength(9);
+  expect(await page.locator("html").getAttribute("data-host-events")).toBeNull();
+  await page.getByRole("button", { name: "Close editor", exact: true }).click();
+  await page.locator("#graph-canvas").focus();
+  await page.keyboard.press("o");
+  await page.locator("#graph-canvas").dispatchEvent("paste", { bubbles: true, cancelable: true });
+  await expect(page.locator("html")).toHaveAttribute("data-host-events", "keydown,keypress,keyup,paste,");
+  expect(uploads).toBe(1);
+  await page.getByRole("button", { name: "Open MOSS editor", exact: true }).click();
+  await page.evaluate(() => delete document.documentElement.dataset.hostEvents);
+  await page.getByRole("dialog").focus();
+  await page.keyboard.press("v");
+  expect(await page.locator("html").getAttribute("data-host-events")).toBeNull();
+});
+
+test("native text clipboard editing stays inside the editor, expanded fields and native modals", async ({ page }) => {
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.addInitScript(() => {
+    for (const type of ["keydown", "keyup", "keypress", "paste", "copy", "cut"]) {
+      document.addEventListener(type, () => {
+        document.documentElement.dataset.hostEvent = type;
+      });
+    }
+  });
+  await openEditor(page);
+  const field = page.locator(".region-details").getByRole("textbox", { name: "Caption", exact: true });
+  await field.locator("..").getByRole("button", { name: "Expand", exact: true }).click();
+  await field.fill("");
+  await page.evaluate(() => navigator.clipboard.writeText("editor text"));
+  await field.focus();
+  await page.keyboard.press("Control+v");
+  await expect(field).toHaveValue("editor text");
+  await page.keyboard.press("Control+a");
+  await page.keyboard.press("Control+c");
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("editor text");
+  await page.keyboard.press("Control+x");
+  await expect(field).toHaveValue("");
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Editor settings", exact: true }).click();
+  const search = page.getByRole("searchbox", { name: "Search shortcuts" });
+  await page.evaluate(() => navigator.clipboard.writeText("Object"));
+  await search.focus();
+  await page.keyboard.press("Control+v");
+  await expect(search).toHaveValue("Object");
+  await page.getByRole("button", { name: "Close settings", exact: true }).click();
+  await page.getByRole("button", { name: "Canvas", exact: true }).click();
+  await page.getByRole("button", { name: "Manage presets", exact: true }).click();
+  const presets = page.getByRole("dialog", { name: "Manage aspect-ratio presets", exact: true });
+  const name = presets.getByRole("textbox", { name: "Preset 1 name", exact: true });
+  await page.evaluate(() => navigator.clipboard.writeText("Pasted preset"));
+  await name.fill("");
+  await name.focus();
+  await page.keyboard.press("Control+v");
+  await expect(name).toHaveValue("Pasted preset");
+  await page.keyboard.type("!");
+  await expect(name).toHaveValue("Pasted preset!");
+  expect(await page.locator("html").getAttribute("data-host-event")).toBeNull();
+});
+
+test("native image paste automatically matches the canvas and is one undo step", async ({ page }) => {
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
   const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="913" height="607"/>';
   await page.route("**/neriss_comfynodes/editor/reference_image**", (route) =>
     route.fulfill(
@@ -844,14 +944,18 @@ test("pasting an image automatically matches the canvas and is one undo step", a
     ),
   );
   await openEditor(page);
+  const copied = await page.evaluate(async () => {
+    const image = document.createElement("canvas");
+    image.width = 913;
+    image.height = 607;
+    const blob = await new Promise<Blob | null>((resolve) => image.toBlob(resolve, "image/png"));
+    if (!blob) return false;
+    await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+    return true;
+  });
+  expect(copied).toBe(true);
   await page.getByRole("application", { name: "Layout canvas" }).focus();
-  await page.evaluate((image) => {
-    const clipboard = new DataTransfer();
-    clipboard.items.add(new File([image], "pasted.svg", { type: "image/svg+xml" }));
-    document.activeElement?.dispatchEvent(
-      new ClipboardEvent("paste", { clipboardData: clipboard, bubbles: true, cancelable: true }),
-    );
-  }, svg);
+  await page.keyboard.press("Control+v");
   await expect.poll(async () => (await readState(page)).reference_image_path).toBe("pasted.svg");
   const pasted = await readState(page);
   expect([pasted.width, pasted.height]).toEqual([913, 607]);
