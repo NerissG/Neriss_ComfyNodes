@@ -11,6 +11,7 @@
     editorStateSchema,
     matchImageDimensions,
     parseEditorState,
+    setAspectRatio,
     stringifyEditorState,
     type EditorModel,
     type EditorState,
@@ -272,16 +273,14 @@
   }
   function applyImage(image: ReferenceImage) {
     canvas?.cancelInteraction();
-    persist(
-      matchImageDimensions(
-        { ...state, reference_image_path: image.path, reference_image_name: image.name },
-        image.width,
-        image.height,
-      ),
-    );
+    const next = { ...state, reference_image_path: image.path, reference_image_name: image.name };
+    const matched = next.target_locked
+      ? setAspectRatio(next, image.width, image.height)
+      : matchImageDimensions(next, image.width, image.height);
+    persist(matched);
     canvas?.fitCanvas();
     showImage = true;
-    setNotice(`Reference image loaded. Canvas matched to ${image.width} × ${image.height}.`);
+    setNotice(`Reference image loaded. Canvas matched to ${matched.width} × ${matched.height}.`);
   }
   async function loadReference(file: File) {
     const activeSession = session;

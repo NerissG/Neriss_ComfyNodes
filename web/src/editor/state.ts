@@ -35,6 +35,8 @@ export const editorStateSchema = z.object({
   height: z.number().int().positive().default(1024),
   megapixels: z.number().positive().default(1),
   side_step: z.number().int().positive().default(64),
+  size_mode: z.enum(["megapixels", "squared"]).default("megapixels"),
+  target_locked: z.boolean().default(false),
   high_level_description: textSchema.default(""),
   background: textSchema.default("Dark gray design canvas with a subtle grid."),
   style_description: editorStyleSchema.prefault({}),
@@ -133,10 +135,6 @@ export function createRegion(type: RegionTool, bbox: Bbox | null = null): Editor
     text: "",
     color_palette: [],
   };
-}
-
-export function resizeFromMegapixels(state: EditorState): EditorState {
-  return setAspectRatio(state, state.width, state.height);
 }
 
 export function matchImageDimensions(state: EditorState, width: number, height: number): EditorState {

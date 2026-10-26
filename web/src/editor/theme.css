@@ -74,6 +74,9 @@
   font-size: 14px;
   font-weight: 400;
 }
+.neriss-editor-theme :is(input, select, textarea):disabled {
+  opacity: 0.5;
+}
 .neriss-editor-theme :is(input, textarea)::placeholder {
   color: var(--placeholder);
 }

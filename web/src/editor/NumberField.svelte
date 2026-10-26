@@ -5,6 +5,7 @@
   export let min = -Infinity;
   export let max = Infinity;
   export let step = 1;
+  export let disabled = false;
   export let onchange: (value: number) => void;
   let draft = String(value);
   let error = "";
@@ -29,6 +30,7 @@
     min={Number.isFinite(min) ? min : undefined}
     max={Number.isFinite(max) ? max : undefined}
     {step}
+    {disabled}
     value={draft}
     aria-invalid={!!error}
     oninput={(event) => {

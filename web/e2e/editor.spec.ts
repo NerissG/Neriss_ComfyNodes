@@ -812,14 +812,14 @@ test("reference uploads and image matching preserve the exact source ratio", asy
   await page
     .locator('input[type="file"]')
     .setInputFiles({ name: "reference.svg", mimeType: "image/svg+xml", buffer: Buffer.from(svg) });
-  await expect(page.getByRole("button", { name: "Match image ratio", exact: true })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Match size", exact: true })).toBeEnabled();
   const uploaded = await readState(page);
   expect([uploaded.width, uploaded.height]).toEqual([803, 397]);
   expect(uploaded.megapixels).toBe((803 * 397) / 1_000_000);
   const width = page.getByRole("spinbutton", { name: "Width", exact: true });
   await width.fill("1024");
   await width.press("Enter");
-  await page.getByRole("button", { name: "Match image ratio", exact: true }).click();
+  await page.getByRole("button", { name: "Match size", exact: true }).click();
   const matched = await readState(page);
   expect([matched.width, matched.height]).toEqual([803, 397]);
   // Measure the image viewport without the frame's one-pixel border.
@@ -970,7 +970,7 @@ test("aspect ratios use the user's saved presets and retain the megapixel target
   await page.getByRole("button", { name: "Canvas", exact: true }).click();
   const presets = page.getByRole("combobox", { name: "Aspect ratio", exact: true });
   await expect(presets).toBeEnabled();
-  await expect(presets.locator("option")).toHaveText(["Choose a preset…", "My banner · 7:2", "My poster · 3:5"]);
+  await expect(presets.locator("option")).toHaveText(["Custom", "My banner · 7:2", "My poster · 3:5"]);
   const before = await readState(page);
   await presets.selectOption("My banner");
   const after = await readState(page);
@@ -978,6 +978,57 @@ test("aspect ratios use the user's saved presets and retain the megapixel target
   expect(after.height).toBe(640);
   expect(after.megapixels).toBe(before.megapixels);
   await expect(presets).toHaveValue("My banner");
+});
+
+test("custom ratios, squared targets and the target lock keep the pixel count", async ({ page }, testInfo) => {
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="8000" height="6000"/>';
+  await page.route("**/neriss_comfynodes/editor/reference_image**", (route) =>
+    route.fulfill(
+      route.request().method() === "POST"
+        ? { json: { path: "large.svg", name: "large.svg", width: 8000, height: 6000 } }
+        : { contentType: "image/svg+xml", body: svg },
+    ),
+  );
+  await openEditor(page);
+  await page.getByRole("button", { name: "Canvas", exact: true }).click();
+  const ratioWidth = page.getByRole("spinbutton", { name: "Ratio width", exact: true });
+  const ratioHeight = page.getByRole("spinbutton", { name: "Ratio height", exact: true });
+  await ratioWidth.fill("16");
+  await ratioWidth.press("Enter");
+  await ratioHeight.fill("9");
+  await ratioHeight.press("Enter");
+  await expect(ratioWidth).toHaveValue("16");
+  await expect(ratioHeight).toHaveValue("9");
+  await page.getByRole("button", { name: "Squared", exact: true }).click();
+  const side = page.getByRole("spinbutton", { name: "Square side", exact: true });
+  await side.fill("1024");
+  await side.press("Enter");
+  const sized = await readState(page);
+  expect([sized.width, sized.height, sized.size_mode]).toEqual([1344, 768, "squared"]);
+  await expect(ratioWidth).toHaveValue("16");
+
+  const lock = page.getByRole("button", { name: "Lock target", exact: true });
+  await lock.click();
+  await expect(side).toBeDisabled();
+  await expect(page.getByRole("spinbutton", { name: "Width", exact: true })).toBeDisabled();
+  await expect(ratioWidth).toBeEnabled();
+  await page
+    .locator('input[type="file"]')
+    .setInputFiles({ name: "large.svg", mimeType: "image/svg+xml", buffer: Buffer.from(svg) });
+  await expect.poll(async () => (await readState(page)).reference_image_path).toBe("large.svg");
+  const locked = await readState(page);
+  expect([locked.width, locked.height, locked.megapixels, locked.target_locked]).toEqual([1152, 896, 1.048576, true]);
+  await expect(ratioWidth).toHaveValue("4");
+  await expect(ratioHeight).toHaveValue("3");
+  await page.getByRole("button", { name: "Swap", exact: true }).click();
+  expect([(await readState(page)).width, (await readState(page)).height]).toEqual([896, 1152]);
+  await page.getByRole("button", { name: "Match ratio", exact: true }).click();
+  expect([(await readState(page)).width, (await readState(page)).height]).toEqual([1152, 896]);
+  await page.screenshot({ path: testInfo.outputPath("canvas-controls.png") });
+  await lock.click();
+  await page.getByRole("button", { name: "Match size", exact: true }).click();
+  const matched = await readState(page);
+  expect([matched.width, matched.height]).toEqual([8000, 6000]);
 });
 
 test("preset load errors can be retried without substituting hardcoded ratios", async ({ page }) => {
@@ -996,7 +1047,7 @@ test("preset load errors can be retried without substituting hardcoded ratios", 
   failed = false;
   await page.getByRole("button", { name: "Retry loading presets", exact: true }).click();
   await expect(presets).toBeEnabled();
-  await expect(presets.locator("option")).toHaveText(["Choose a preset…", "Recovered · 5:4"]);
+  await expect(presets.locator("option")).toHaveText(["Custom", "Recovered · 5:4"]);
 });
 
 test("selection remains visible while hovering and the canvas has no top toolbar strip", async ({ page }, testInfo) => {
@@ -1270,7 +1321,6 @@ test("image fitting is immediately accessible and persisted independently of can
   await width.fill("400");
   await width.press("Enter");
   await expect(page.locator("svg image")).toHaveAttribute("preserveAspectRatio", "none");
-  await expect(page.getByRole("spinbutton", { name: "Ratio width", exact: true })).not.toBeVisible();
   await expect(fitting).toBeInViewport();
   await expect(page.getByRole("button", { name: "Manage presets", exact: true })).toBeInViewport();
   await fitting.selectOption("contain");
@@ -1318,7 +1368,7 @@ test("AR presets can be edited and saved from Canvas, with failed saves retainin
   failSave = false;
   await page.getByRole("button", { name: "Save presets", exact: true }).click();
   const ratios = page.getByRole("combobox", { name: "Aspect ratio", exact: true });
-  await expect(ratios.locator("option")).toHaveText(["Choose a preset…", "New portrait · 1:2", "Custom wide · 7:2"]);
+  await expect(ratios.locator("option")).toHaveText(["Custom", "New portrait · 1:2", "Custom wide · 7:2"]);
   await page.getByRole("button", { name: "Regions", exact: true }).click();
   await page.getByRole("button", { name: "Canvas", exact: true }).click();
   await ratios.selectOption("New portrait");
@@ -1347,7 +1397,7 @@ test("preset management is a modal with contained keyboard focus and cancel rest
   await page.keyboard.press("Escape");
   await expect(modal).toHaveCount(0);
   await expect(trigger).toBeFocused();
-  await expect(ratio.locator("option")).toHaveText(["Choose a preset…", "My banner · 7:2", "My poster · 3:5"]);
+  await expect(ratio.locator("option")).toHaveText(["Custom", "My banner · 7:2", "My poster · 3:5"]);
   await trigger.click();
   await expect(modal.getByRole("textbox", { name: "Preset 1 name", exact: true })).toHaveValue("My banner");
   await modal.getByRole("button", { name: "Cancel", exact: true }).click();
@@ -1437,12 +1487,7 @@ test("preset drag ordering stays a draft, saves globally, and applying a ratio r
   await modal.getByRole("button", { name: "Save presets", exact: true }).click();
   await expect(modal).toHaveCount(0);
   const ratios = page.getByRole("combobox", { name: "Aspect ratio", exact: true });
-  await expect(ratios.locator("option")).toHaveText([
-    "Choose a preset…",
-    "Square · 1:1",
-    "My banner · 7:2",
-    "My poster · 3:5",
-  ]);
+  await expect(ratios.locator("option")).toHaveText(["Custom", "Square · 1:1", "My banner · 7:2", "My poster · 3:5"]);
   expect(await readState(page)).toEqual(before);
   await ratios.selectOption("My poster");
   expect((await readState(page)).height).toBeGreaterThan((await readState(page)).width);
@@ -1489,7 +1534,7 @@ test("the standalone preset manager uses the editor theme and publishes changes 
   await page.getByRole("button", { name: "Open MOSS editor", exact: true }).click();
   await page.getByRole("button", { name: "Canvas", exact: true }).click();
   await expect(page.getByRole("combobox", { name: "Aspect ratio", exact: true }).locator("option")).toHaveText([
-    "Choose a preset…",
+    "Custom",
     "New ratio · 7:2",
   ]);
 });
