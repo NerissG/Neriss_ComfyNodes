@@ -33,7 +33,14 @@
     writeWidgetValue,
     type ReferenceImage,
   } from "@/editor/services";
-  import { createHistory, recordHistory, redoHistory, undoHistory } from "@/editor/history";
+  import {
+    createHistory,
+    recordHistory,
+    redoHistory,
+    restoreHistory,
+    undoHistory,
+    type EditorHistory,
+  } from "@/editor/history";
   import { removeRegions } from "@/editor/regions";
   import { canvasTools, type CanvasTool } from "@/editor/tools";
   import { uiSettings } from "@/settings/store";
@@ -49,6 +56,7 @@
 
   let state = createInitialState();
   let history = createHistory(state);
+  const nodeHistories = new WeakMap<ComfyNode, EditorHistory>();
   let node: ComfyNode | null = null;
   let model: EditorModel = "ideogram";
   let error: string | null = null;
@@ -157,6 +165,10 @@
     hoveredId = null;
     setNotice(`Deleted ${count} ${count === 1 ? "region" : "regions"}. Use Undo to restore.`);
   }
+  function retainHistory() {
+    canvas?.cancelInteraction();
+    if (node && invalidState === null) nodeHistories.set(node, history);
+  }
   function openEditor(event: Event) {
     if (!(event instanceof CustomEvent)) return;
     const detail = eventSchema.safeParse(event.detail);
@@ -168,6 +180,7 @@
     }
     const nextModel = editorModel(parsed.value);
     if (!nextModel) return;
+    retainHistory();
     previousFocus = document.activeElement;
     model = nextModel;
     session += 1;
@@ -196,8 +209,9 @@
       setError(saved.error);
       invalidState = typeof raw === "string" ? raw : (JSON.stringify(raw) ?? "");
       state = createInitialState();
+      nodeHistories.delete(node);
     } else state = saved.value;
-    history = createHistory(state);
+    history = restoreHistory(nodeHistories.get(node), state);
   }
   function stateUpdated(event: Event) {
     if (!(event instanceof CustomEvent) || !node || invalidState !== null) return;
@@ -213,7 +227,7 @@
   }
   function closeEditor() {
     showSettings = false;
-    canvas?.cancelInteraction();
+    retainHistory();
     session += 1;
     node = null;
     if (previousFocus instanceof HTMLElement) previousFocus.focus();

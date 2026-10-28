@@ -3,6 +3,7 @@ import { resolutionPresetSchema } from "../src/resolution/presets";
 import { Buffer } from "node:buffer";
 import { expect, type Page } from "@playwright/test";
 import { parseEditorState, type EditorModel } from "../src/editor/state";
+import { editorNodeIds, OPEN_EDITOR_EVENT } from "../src/editor/models";
 import { IdeogramV4JsonPromptSchema } from "../src/ideogram/schema";
 import { mockUiSettings } from "./settings-mock";
 import { test } from "./fixtures";
@@ -41,6 +42,79 @@ async function drawSelectedRegion(page: Page) {
 }
 
 for (const model of ["moss", "ideogram"] satisfies EditorModel[]) {
+  test(`${model}: undo and redo survive closing and reopening the editor`, async ({ page }) => {
+    await openEditor(page, model);
+    const original = await readState(page);
+    const caption = page.getByRole("textbox", { name: model === "moss" ? "Caption" : "Description", exact: true });
+    const dialog = page.getByRole("dialog");
+    const reopen = page.getByRole("button", {
+      name: model === "moss" ? "Open MOSS editor" : "Open Ideogram editor",
+      exact: true,
+    });
+    const close = page.getByRole("button", { name: "Close editor", exact: true });
+    const undo = page.getByRole("button", { name: "Undo", exact: true });
+    const redo = page.getByRole("button", { name: "Redo", exact: true });
+
+    await caption.fill("First edit before closing");
+    const firstEdit = await readState(page);
+    await close.click();
+    await expect(dialog).toHaveCount(0);
+    await reopen.click();
+    await expect(undo).toBeEnabled();
+    await dialog.focus();
+    await page.keyboard.press("Control+z");
+    expect(await readState(page)).toEqual(original);
+
+    await close.click();
+    await reopen.click();
+    await expect(redo).toBeEnabled();
+    await dialog.focus();
+    await page.keyboard.press("Control+Shift+z");
+    expect(await readState(page)).toEqual(firstEdit);
+
+    await caption.fill("Second edit after reopening");
+    await close.click();
+    await reopen.click();
+    await undo.click();
+    expect(await readState(page)).toEqual(firstEdit);
+    await undo.click();
+    expect(await readState(page)).toEqual(original);
+    await expect(undo).toBeDisabled();
+  });
+
+  test(`${model}: switching node instances keeps their histories separate even with the same id`, async ({ page }) => {
+    await openEditor(page, model);
+    const original = await readState(page);
+    const caption = page.getByRole("textbox", { name: model === "moss" ? "Caption" : "Description", exact: true });
+    await caption.fill("Edit belonging to the original node");
+    const edited = await readState(page);
+
+    // Open a distinct node directly while the first editor is still open.
+    await page.evaluate(
+      ({ state, nodeClass, eventName }) => {
+        const node = {
+          id: "editor-preview",
+          comfyClass: nodeClass,
+          widgets: [{ name: "state_json", value: JSON.stringify(state) }],
+          addWidget: () => ({ name: "unused" }),
+        };
+        window.dispatchEvent(new CustomEvent(eventName, { detail: { node } }));
+      },
+      { state: original, nodeClass: editorNodeIds[model], eventName: OPEN_EDITOR_EVENT },
+    );
+    await expect(caption).toHaveValue(original.elements[1].desc);
+    await expect(page.getByRole("button", { name: "Undo", exact: true })).toBeDisabled();
+    await caption.fill("Edit belonging to the other node");
+    await page.getByRole("button", { name: "Close editor", exact: true }).click();
+    await page
+      .getByRole("button", { name: model === "moss" ? "Open MOSS editor" : "Open Ideogram editor", exact: true })
+      .click();
+    expect(await readState(page)).toEqual(edited);
+    await page.getByRole("dialog").focus();
+    await page.keyboard.press("Control+z");
+    expect(await readState(page)).toEqual(original);
+  });
+
   for (const count of [3, 4]) {
     test(`${model}: modifier-click cycles through all ${count} stacked elements`, async ({ page }) => {
       await openEditor(page, model, true);
