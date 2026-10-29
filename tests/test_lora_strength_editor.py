@@ -101,6 +101,47 @@ class DiscoveryTests(unittest.TestCase):
         self.assertIsInstance(result, lora.Ok)
         self.assertEqual(result.value, ({destination: -0.25}, []))
 
+    def test_bias_patch_keys_preserve_slices_and_callbacks(self) -> None:
+        offset = (0, 2, 2)
+
+        def transform(weight: torch.Tensor) -> torch.Tensor:
+            return weight
+
+        for destination, expected in (
+            ("layer.weight", "layer.bias"),
+            (("layer.weight", offset), ("layer.bias", offset)),
+            (("layer.weight", offset, transform), ("layer.bias", offset, transform)),
+        ):
+            with self.subTest(destination=destination):
+                result = lora.bias_patch_key(destination)
+                self.assertIsInstance(result, lora.Ok)
+                self.assertEqual(result.value, expected)
+        for destination in (None, 5, "layer.bias", "layer", (), ("layer.weight",), (None, offset)):
+            with self.subTest(destination=destination):
+                self.assertIsInstance(lora.bias_patch_key(destination), lora.Err)
+
+    def test_bias_strength_planning_does_not_use_comfy_bias_key(self) -> None:
+        destination = ("diffusion_model.qkv.weight", (0, 2, 2))
+        for weight_suffix, bias_suffix in ((".diff", ".diff_b"), (".w_norm", ".b_norm")):
+            original = {f"source{weight_suffix}": torch.ones(2, 2), f"source{bias_suffix}": torch.ones(2)}
+            with patch.object(
+                lora.comfy.lora, "bias_key", create=True, side_effect=AssertionError("Not part of the pinned Comfy API")
+            ):
+                result = lora.patch_strengths(
+                    original, original, {"source": destination}, lora.StrengthState("a", {"source": 0.5})
+                )
+            self.assertIsInstance(result, lora.Ok)
+            self.assertEqual(
+                result.value,
+                (
+                    {
+                        destination: 0.5,
+                        ("diffusion_model.qkv.bias", (0, 2, 2)): 0.5,
+                    },
+                    [],
+                ),
+            )
+
     def test_real_comfy_format_conversion_keeps_rules_on_original_names(self) -> None:
         source = "lora_unet__blocks_0_cross_attn_k"
         original = adapter(source)

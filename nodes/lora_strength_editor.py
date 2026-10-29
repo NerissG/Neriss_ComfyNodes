@@ -184,6 +184,22 @@ async def lora_targets(request: web.Request) -> web.Response:
     return web.json_response(result.value)
 
 
+def bias_patch_key(destination: object) -> Result[object, EditorError]:
+    """Resolve bias targets locally; preserve sliced-patch offsets and callbacks."""
+    if isinstance(destination, str) and destination.endswith(".weight"):
+        return Ok(destination.removesuffix(".weight") + ".bias")
+    if (
+        isinstance(destination, tuple)
+        and len(destination) >= 2
+        and isinstance(destination[0], str)
+        and destination[0].endswith(".weight")
+    ):
+        return Ok((destination[0].removesuffix(".weight") + ".bias", *destination[1:]))
+    return Err(
+        editor_errors.runtime("Cannot resolve LoRA bias patch target: expected a weight key or sliced weight key")
+    )
+
+
 def patch_strengths(
     original: dict[str, torch.Tensor],
     converted: dict[str, torch.Tensor],
@@ -223,7 +239,10 @@ def patch_strengths(
         strength = values.pop()
         destinations = [destination]
         if f"{target}.diff_b" in converted or f"{target}.b_norm" in converted:
-            destinations.append(comfy.lora.bias_key(destination))
+            bias = bias_patch_key(destination)
+            if isinstance(bias, Err):
+                return bias
+            destinations.append(bias.value)
         for key in destinations:
             if key in strengths and strengths[key] != strength:
                 return Err(editor_errors.runtime(f"Conflicting strengths for aliased target: {target}"))
