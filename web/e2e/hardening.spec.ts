@@ -1,8 +1,8 @@
 import { readFile } from "node:fs/promises";
 import { expect } from "@playwright/test";
 import { z } from "zod";
-import { resolutionPresetSchema } from "../src/resolution/presets";
-import { parseEditorState } from "../src/editor/state";
+import { resolutionPresetSchema } from "../src/resolution/api";
+import { parseEditorState } from "../src/layout/state";
 import { test } from "./fixtures";
 
 const endpoint = "**/neriss_comfynodes/resolution/presets";

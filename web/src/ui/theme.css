@@ -1,0 +1,156 @@
+#neriss-root {
+  z-index: 9999;
+  pointer-events: none;
+}
+.neriss-theme {
+  --surface-0: #141414;
+  --surface-1: #1b1b1b;
+  --surface-2: #212121;
+  --surface-3: #282828;
+  --field: #161616;
+  --control: #242725;
+  --control-hover: #2d312e;
+  --border: #303431;
+  --border-strong: #3d433e;
+  --text: #e4e4e4;
+  --text-2: #bdbdbd;
+  --muted: #a0a0a0;
+  --placeholder: #7c7c7c;
+  --accent: #a8c7ae;
+  --accent-bg: #283029;
+  --accent-line: #6b8871;
+  --accent-ink: #101611;
+  --danger: #eda5a5;
+  --backdrop: #0b0b0bb8;
+  color: var(--text);
+  color-scheme: dark;
+  font:
+    14px/1.45 Inter,
+    ui-sans-serif,
+    system-ui,
+    sans-serif;
+}
+.neriss-theme,
+.neriss-theme * {
+  box-sizing: border-box;
+}
+.neriss-theme :is(button, input, select, textarea) {
+  font: inherit;
+}
+.neriss-theme button {
+  color: var(--text);
+  background: var(--control);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  padding: 6px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.neriss-theme button:hover {
+  background: var(--control-hover);
+  border-color: var(--accent-line);
+}
+.neriss-theme button:disabled {
+  opacity: 0.38;
+  cursor: default;
+}
+.neriss-theme button.quiet {
+  background: transparent;
+  border-color: transparent;
+}
+.neriss-theme button.quiet:hover {
+  background: var(--control-hover);
+}
+.neriss-theme .danger,
+.neriss-theme .field-error {
+  color: var(--danger);
+}
+.neriss-theme :is(input, select, textarea) {
+  width: 100%;
+  min-width: 0;
+  color: var(--text);
+  background: var(--field);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 14px;
+  font-weight: 400;
+}
+.neriss-theme :is(input, select, textarea):disabled {
+  opacity: 0.5;
+}
+.neriss-theme :is(input, textarea)::placeholder {
+  color: var(--placeholder);
+}
+.neriss-theme :is(input, select, textarea, button, summary):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.neriss-theme label {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  margin-bottom: 12px;
+  font-size: 12px;
+  color: var(--text-2);
+  font-weight: 500;
+}
+.neriss-theme .button-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.neriss-theme button:where(.primary) {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 500;
+}
+.neriss-theme button:where(.primary:hover:not(:disabled)) {
+  filter: brightness(1.08);
+}
+.neriss-theme button:where([aria-pressed="true"]) {
+  color: var(--accent);
+  background: var(--accent-bg);
+}
+.neriss-theme button:where(.icon-button) {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+}
+.neriss-theme button:where(.icon-button:hover:not(:disabled)) {
+  background: var(--surface-3);
+  color: var(--text);
+}
+.neriss-theme button:where(.with-icon) {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.neriss-theme :is(input, select, textarea)[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+.neriss-theme .empty-state {
+  margin: 0;
+  padding: 24px 12px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 12px;
+}
+.neriss-theme .sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

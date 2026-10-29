@@ -21,8 +21,7 @@ const {
   hasClipTargets,
 } = await server.ssrLoadModule("/src/lora/blocks.ts");
 const { comfyUrl } = await server.ssrLoadModule("/src/comfy/api.ts");
-const { loraChoices } = await server.ssrLoadModule("/src/lora/services.ts");
-const { prepareLoraChoices, filterLoraChoices } = await server.ssrLoadModule("/src/lora/picker.ts");
+const { loraChoices, prepareLoraChoices, filterLoraChoices } = await server.ssrLoadModule("/src/lora/picker.ts");
 
 test("LoRA search matches filename and folder terms in any order, ignoring case and separators", () => {
   const choices = prepareLoraChoices([

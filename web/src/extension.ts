@@ -4,40 +4,19 @@ import { configureComfyApi } from "@/comfy/api";
 import App from "@/App.svelte";
 import { comfyErrors } from "@/errors";
 import { parseComfyAppModule, parseComfyNodeData } from "@/comfy/guards";
-import type { ComfyMenuOption, ComfyNode, ComfyNodeData, ComfyNodeType } from "@/comfy/types";
-import { encodeEditorState, parseEditorState, type EditorState } from "@/editor/state";
-import { editorModel, editorNodeIds, importPromptText, OPEN_EDITOR_EVENT, STATE_UPDATED_EVENT } from "@/editor/models";
-import { readWidgetValue, writeWidgetValue } from "@/editor/services";
-import { openResolutionPresetManager } from "@/resolution/library";
+import { addButton, extendNodeType, hideWidget, isNodeOfType, readWidgetValue, writeWidgetValue } from "@/comfy/nodes";
+import type { ComfyNode, ComfyNodeData, ComfyNodeType } from "@/comfy/types";
+import { encodeEditorState, parseEditorState, type EditorState } from "@/layout/state";
+import { editorModel, editorNodeIds, importPromptText } from "@/layout/models";
 import { LORA_NODE_ID } from "@/lora/state";
-import { openLoraEditor } from "@/lora/services";
-import {
-  connectResolutionSelector,
-  isResolutionSelectorNode,
-  RESOLUTION_SELECTOR_NODE_ID,
-} from "@/resolution/selector";
+import { connectResolutionSelector, RESOLUTION_SELECTOR_NODE_ID } from "@/resolution/selector";
+import { openLayoutEditor, openLoraEditor, openPresetEditor } from "@/views";
 
 const OPEN_EDITOR_LABEL = "Open Layout Editor";
 const APPLY_SIZE_LABEL = "Apply Size To Editor";
 const APPLY_JSON_LABEL = "Apply JSON To Editor";
 const APPLY_AVAILABLE_LABEL = "Apply Size + JSON";
 const MANAGE_RESOLUTION_PRESETS_LABEL = "Manage AR Presets";
-
-function openLayoutEditor(node: ComfyNode) {
-  window.dispatchEvent(new CustomEvent(OPEN_EDITOR_EVENT, { detail: { node } }));
-}
-
-function findWidget(node: ComfyNode, name: string) {
-  return node.widgets?.find((widget) => widget.name === name) ?? null;
-}
-
-function resizeNode(node: ComfyNode) {
-  requestAnimationFrame(() => {
-    const size = node.computeSize?.call(node);
-    if (size) node.setSize?.call(node, size);
-  });
-  node.setDirtyCanvas?.call(node, true, true);
-}
 
 function readEditorState(node: ComfyNode): EditorState | null {
   const result = parseEditorState(readWidgetValue(node, "state_json"));
@@ -55,7 +34,6 @@ function saveEditorState(node: ComfyNode, state: EditorState) {
     return;
   }
   writeWidgetValue(node, "state_json", encoded.value);
-  window.dispatchEvent(new CustomEvent(STATE_UPDATED_EVENT, { detail: { node, state } }));
 }
 
 function numericWidgetValue(node: ComfyNode, name: string): number | null {
@@ -94,37 +72,21 @@ function applyAvailableInputsToEditor(node: ComfyNode) {
   applyJsonToEditor(node);
 }
 
-function addButton(node: ComfyNode, label: string, callback: () => void) {
-  if (node.widgets?.some((widget) => widget.name === label)) return;
-  node.addWidget.call(node, "button", label, null, callback);
-}
-
-function hideWidget(node: ComfyNode, name: string) {
-  const widget = findWidget(node, name);
-  if (!widget) return;
-  widget.hidden = true;
-  widget.type = "hidden";
-  widget.computeSize = () => [0, -4];
-  const inputIndex = node.inputs?.findIndex((input) => input.name === name) ?? -1;
-  if (inputIndex !== -1) node.removeInput?.call(node, inputIndex);
-  resizeNode(node);
-}
-
 function ensureResolutionSelectorControls(node: ComfyNode) {
-  if (!isResolutionSelectorNode(node)) return;
+  if (!isNodeOfType(node, RESOLUTION_SELECTOR_NODE_ID)) return;
   hideWidget(node, "preset_aspect_x");
   hideWidget(node, "preset_aspect_y");
-  addButton(node, MANAGE_RESOLUTION_PRESETS_LABEL, openResolutionPresetManager);
+  addButton(node, MANAGE_RESOLUTION_PRESETS_LABEL, openPresetEditor);
   connectResolutionSelector(node);
 }
 
 function ensureLoraControls(node: ComfyNode) {
-  if (node.comfyClass !== LORA_NODE_ID && node.type !== LORA_NODE_ID) return;
+  if (!isNodeOfType(node, LORA_NODE_ID)) return;
   hideWidget(node, "state_json");
   addButton(node, "Open Strength Editor", () => openLoraEditor(node));
 }
 
-function ensureOpenEditorButton(node: ComfyNode) {
+function ensureLayoutEditorControls(node: ComfyNode) {
   if (!editorModel(node)) return;
   hideWidget(node, "state_json");
   addButton(node, OPEN_EDITOR_LABEL, () => openLayoutEditor(node));
@@ -150,60 +112,35 @@ if (comfyModuleResult.isOk()) {
   app.registerExtension({
     name: "Neriss.ComfyNodes.LayoutEditor",
     async setup() {
-      if (document.getElementById("neriss-layout-editor-root")) return;
+      if (document.getElementById("neriss-root")) return;
       const host = document.createElement("div");
-      host.id = "neriss-layout-editor-root";
+      host.id = "neriss-root";
       document.body.appendChild(host);
       mount(App, { target: host });
     },
     async beforeRegisterNodeDef(nodeType: ComfyNodeType, nodeData: ComfyNodeData) {
       const nodeDataResult = parseComfyNodeData(nodeData);
       if (nodeDataResult.isErr()) return;
-      if (nodeDataResult.value.name === LORA_NODE_ID) {
-        const originalOnNodeCreated = nodeType.prototype.onNodeCreated;
-        nodeType.prototype.onNodeCreated = function onNodeCreated() {
-          originalOnNodeCreated?.call(this);
-          ensureLoraControls(this);
-        };
-        return;
-      }
-      if (nodeDataResult.value.name === RESOLUTION_SELECTOR_NODE_ID) {
-        const originalOnNodeCreated = nodeType.prototype.onNodeCreated;
-        nodeType.prototype.onNodeCreated = function onNodeCreated() {
-          originalOnNodeCreated?.call(this);
-          ensureResolutionSelectorControls(this);
-        };
-        const originalGetExtraMenuOptions = nodeType.prototype.getExtraMenuOptions;
-        nodeType.prototype.getExtraMenuOptions = function getExtraMenuOptions(
-          graphCanvas: unknown,
-          options: ComfyMenuOption[],
-        ) {
-          originalGetExtraMenuOptions?.call(this, graphCanvas, options);
-          options.push({ content: MANAGE_RESOLUTION_PRESETS_LABEL, callback: openResolutionPresetManager });
-        };
-        return;
-      }
-      if (nodeDataResult.value.name !== editorNodeIds.ideogram && nodeDataResult.value.name !== editorNodeIds.moss)
-        return;
-      const originalOnNodeCreated = nodeType.prototype.onNodeCreated;
-      nodeType.prototype.onNodeCreated = function onNodeCreated() {
-        originalOnNodeCreated?.call(this);
-        ensureOpenEditorButton(this);
-      };
-      const originalGetExtraMenuOptions = nodeType.prototype.getExtraMenuOptions;
-      nodeType.prototype.getExtraMenuOptions = function getExtraMenuOptions(
-        graphCanvas: unknown,
-        options: ComfyMenuOption[],
-      ) {
-        originalGetExtraMenuOptions?.call(this, graphCanvas, options);
-        options.push({ content: OPEN_EDITOR_LABEL, callback: () => openLayoutEditor(this) });
-        options.push({ content: APPLY_SIZE_LABEL, callback: () => applySizeToEditor(this) });
-        options.push({ content: APPLY_JSON_LABEL, callback: () => applyJsonToEditor(this) });
-        options.push({ content: APPLY_AVAILABLE_LABEL, callback: () => applyAvailableInputsToEditor(this) });
-      };
+      const name = nodeDataResult.value.name;
+      if (name === LORA_NODE_ID) extendNodeType(nodeType, { created: ensureLoraControls });
+      else if (name === RESOLUTION_SELECTOR_NODE_ID)
+        extendNodeType(nodeType, {
+          created: ensureResolutionSelectorControls,
+          menu: () => [{ content: MANAGE_RESOLUTION_PRESETS_LABEL, callback: openPresetEditor }],
+        });
+      else if (name === editorNodeIds.ideogram || name === editorNodeIds.moss)
+        extendNodeType(nodeType, {
+          created: ensureLayoutEditorControls,
+          menu: (node) => [
+            { content: OPEN_EDITOR_LABEL, callback: () => openLayoutEditor(node) },
+            { content: APPLY_SIZE_LABEL, callback: () => applySizeToEditor(node) },
+            { content: APPLY_JSON_LABEL, callback: () => applyJsonToEditor(node) },
+            { content: APPLY_AVAILABLE_LABEL, callback: () => applyAvailableInputsToEditor(node) },
+          ],
+        });
     },
     async nodeCreated(node) {
-      ensureOpenEditorButton(node);
+      ensureLayoutEditorControls(node);
       ensureResolutionSelectorControls(node);
       ensureLoraControls(node);
     },

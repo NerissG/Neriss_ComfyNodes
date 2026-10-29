@@ -40,11 +40,11 @@ test(
   async (context) => {
     await server.transformRequest("/src/extension.ts");
     await server.transformRequest("/src/App.svelte");
-    await server.transformRequest("/src/editor/theme.css");
+    await server.transformRequest("/src/ui/theme.css");
     const graph = server.environments.client.moduleGraph;
     assert.equal((await graph.getModuleByUrl("/src/extension.ts")).isSelfAccepting, false);
     assert.equal((await graph.getModuleByUrl("/src/App.svelte")).isSelfAccepting, true);
-    assert.equal((await graph.getModuleByUrl("/src/editor/theme.css")).isSelfAccepting, true);
+    assert.equal((await graph.getModuleByUrl("/src/ui/theme.css")).isSelfAccepting, true);
 
     async function change(path) {
       const payload = new Promise((resolve) => {
@@ -57,9 +57,9 @@ test(
       return result;
     }
 
-    const styleUpdate = await change("../src/editor/theme.css");
+    const styleUpdate = await change("../src/ui/theme.css");
     assert.equal(styleUpdate.type, "update");
-    assert.equal(styleUpdate.updates[0].path, "/src/editor/theme.css");
+    assert.equal(styleUpdate.updates[0].path, "/src/ui/theme.css");
     assert.equal((await change("../src/extension.ts")).type, "full-reload");
   },
 );

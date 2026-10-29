@@ -1,10 +1,10 @@
 import { z } from "zod";
-import { resolutionPresetSchema } from "../src/resolution/presets";
+import { resolutionPresetSchema } from "../src/resolution/api";
 import { Buffer } from "node:buffer";
 import { expect, type Page } from "@playwright/test";
-import { parseEditorState, type EditorModel } from "../src/editor/state";
-import { editorNodeIds, OPEN_EDITOR_EVENT } from "../src/editor/models";
-import { IdeogramV4JsonPromptSchema } from "../src/ideogram/schema";
+import { parseEditorState, type EditorModel } from "../src/layout/state";
+import { editorNodeIds } from "../src/layout/models";
+import { IdeogramV4JsonPromptSchema } from "../src/layout/ideogram/schema";
 import { mockUiSettings } from "./settings-mock";
 import { test } from "./fixtures";
 
@@ -91,16 +91,24 @@ for (const model of ["moss", "ideogram"] satisfies EditorModel[]) {
 
     // Open a distinct node directly while the first editor is still open.
     await page.evaluate(
-      ({ state, nodeClass, eventName }) => {
+      async ({ state, nodeClass, viewsModule }) => {
         const node = {
           id: "editor-preview",
           comfyClass: nodeClass,
           widgets: [{ name: "state_json", value: JSON.stringify(state) }],
           addWidget: () => ({ name: "unused" }),
         };
-        window.dispatchEvent(new CustomEvent(eventName, { detail: { node } }));
+        // The preview serves source modules, so this is the instance the mounted app uses.
+        const views: unknown = await import(viewsModule);
+        if (
+          typeof views === "object" &&
+          views &&
+          "openLayoutEditor" in views &&
+          typeof views.openLayoutEditor === "function"
+        )
+          views.openLayoutEditor(node);
       },
-      { state: original, nodeClass: editorNodeIds[model], eventName: OPEN_EDITOR_EVENT },
+      { state: original, nodeClass: editorNodeIds[model], viewsModule: "/src/views.ts" },
     );
     await expect(caption).toHaveValue(original.elements[1].desc);
     await expect(page.getByRole("button", { name: "Undo", exact: true })).toBeDisabled();
@@ -234,7 +242,7 @@ test("shortcut settings detect conflicts, reserve native keys, isolate modal inp
   await settings.getByRole("button", { name: "Remove Object tool binding 1", exact: true }).click();
   await expect(settings.getByRole("group", { name: "Object tool", exact: true })).toContainText("Disabled");
   await settings.getByRole("searchbox", { name: "Search shortcuts" }).fill("Fit canvas");
-  await expect(settings.getByRole("group")).toHaveCount(1);
+  await expect(settings.locator(".shortcut-row")).toHaveCount(1);
   await page.keyboard.press("Delete");
   expect(await readState(page)).toEqual(original);
   await settings.getByRole("searchbox").fill("");
@@ -265,7 +273,7 @@ test("shortcut categories stay compact and row options work with keyboard and sm
   await openEditor(page);
   await page.getByRole("button", { name: "Editor settings", exact: true }).click();
   const settings = page.getByRole("dialog", { name: "Editor settings", exact: true });
-  const categories = settings.getByRole("navigation", { name: "Shortcut categories" });
+  const categories = settings.getByRole("group", { name: "Shortcut categories" });
   await expect(settings.getByRole("button", { name: /^Reset / })).toHaveCount(1);
   await page.mouse.move(0, 0);
   await settings.screenshot({ path: testInfo.outputPath("shortcut-default.png") });
@@ -364,9 +372,7 @@ test("custom canvas movement and panel shortcuts respect focus, exact modifiers 
   await page.getByRole("button", { name: "Undo", exact: true }).click();
   expect(await readState(page)).toEqual(original);
   await page.keyboard.press("Alt+k");
-  const tab = page
-    .getByRole("navigation", { name: "Editor sections" })
-    .getByRole("button", { name: "Canvas", exact: true });
+  const tab = page.getByRole("group", { name: "Editor sections" }).getByRole("button", { name: "Canvas", exact: true });
   await expect(tab).toHaveAttribute("aria-pressed", "true");
   await expect(tab).toHaveAttribute("aria-keyshortcuts", "Alt+K");
   const resize = page.getByRole("button", { name: "Resize sidebar; use left and right arrow keys", exact: true });
@@ -438,7 +444,7 @@ for (const model of ["moss", "ideogram"] satisfies EditorModel[]) {
     await openEditor(page, model);
     const original = await readState(page);
     const dialog = page.getByRole("dialog");
-    const tabs = page.getByRole("navigation", { name: "Editor sections" });
+    const tabs = page.getByRole("group", { name: "Editor sections" });
     const frame = page.locator("svg > g[transform]").first();
     const originalTransform = await frame.getAttribute("transform");
     for (const [key, label] of [
@@ -1227,7 +1233,7 @@ for (const model of ["moss", "ideogram"] satisfies EditorModel[]) {
       "Preview",
     ];
     await expect(flyout.getByRole("button")).toHaveCount(labels.length);
-    const icons = flyout.locator("svg.file-action-icon[aria-hidden='true']");
+    const icons = flyout.locator("svg.icon[aria-hidden='true']");
     await expect(icons).toHaveCount(labels.length);
     for (const icon of await icons.all()) {
       await expect(icon).toHaveCSS("fill", "none");
@@ -1315,7 +1321,7 @@ test.describe("touch import/export", () => {
 test("the sidebar starts with tabs and file actions remain available with it hidden", async ({ page }) => {
   await openEditor(page);
   const sidebar = await page.locator(".editor-sidebar").boundingBox();
-  const tabs = await page.getByRole("navigation", { name: "Editor sections" }).boundingBox();
+  const tabs = await page.getByRole("group", { name: "Editor sections" }).boundingBox();
   expect(tabs?.y).toBe(sidebar?.y);
   await page.getByRole("button", { name: "Hide panel", exact: true }).click();
   await page.getByRole("button", { name: "Import and export options" }).click();

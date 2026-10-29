@@ -1,4 +1,4 @@
-import { createInitialState, type EditorRegion, type EditorState } from "@/editor/state";
+import { createInitialState, type EditorRegion, type EditorState } from "@/layout/state";
 
 const elements: EditorRegion[] = [
   {

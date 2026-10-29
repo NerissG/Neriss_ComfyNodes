@@ -8,14 +8,15 @@ import { createServer } from "vite";
 const server = await createServer({ server: { middlewareMode: true }, appType: "custom" });
 after(() => server.close());
 const { createInitialState, parseEditorState, stringifyEditorState, setAspectRatio } =
-  await server.ssrLoadModule("/src/editor/state.ts");
-const { buildMossPrompt: buildMossPromptResult, importMossText } = await server.ssrLoadModule("/src/moss/prompt.ts");
+  await server.ssrLoadModule("/src/layout/state.ts");
+const { buildMossPrompt: buildMossPromptResult, importMossText } =
+  await server.ssrLoadModule("/src/layout/moss/prompt.ts");
 const buildMossPrompt = (state) => buildMossPromptResult(state)._unsafeUnwrap();
-const { buildPrompt, importIdeogramText } = await server.ssrLoadModule("/src/ideogram/prompt.ts");
-const { moveRegion, regionOutline, removeRegions } = await server.ssrLoadModule("/src/editor/regions.ts");
+const { buildPrompt, importIdeogramText } = await server.ssrLoadModule("/src/layout/ideogram/prompt.ts");
+const { moveRegion, regionOutline, removeRegions } = await server.ssrLoadModule("/src/layout/regions.ts");
 const { toCentralized, fromCentralized, moveBbox, resizeBbox, bboxFromPoints } =
-  await server.ssrLoadModule("/src/editor/geometry.ts");
-const { parseColor } = await server.ssrLoadModule("/src/editor/colors.ts");
+  await server.ssrLoadModule("/src/layout/geometry.ts");
+const { parseColor } = await server.ssrLoadModule("/src/layout/colors.ts");
 const sample = JSON.parse(await readFile(new URL("../../tests/fixtures/moss_layout.json", import.meta.url), "utf8"));
 
 test("palette colors parse pasted hex and RGB values", () => {

@@ -8,8 +8,18 @@ This repo is a ComfyUI custom node package with Python nodes and a Svelte/TypeSc
 - `nodes/`: Python ComfyUI node definitions and node-local helpers.
 - `shared/`: Python utilities that are reused across multiple node modules, such as result and error primitives.
 - `web/`: browser extension project, including Vite/Svelte config, frontend dependencies, source, and built assets.
-- `web/src/`: TypeScript/Svelte application source.
-- `web/src/editor/`: editor-specific frontend state, canvas behavior, tool definitions, history, and Comfy API integration.
+- `web/src/`: TypeScript/Svelte application source. `extension.ts` registers with Comfy, `App.svelte` mounts the views, and `views.ts` owns which view is open.
+- `web/src/comfy/`: Comfy host integration: HTTP transport (`requestJson`), node widgets and node-type hooks, and runtime guards.
+- `web/src/ui/`: feature-agnostic Svelte components (`Dialog`, `Icon`, `NumberField`, `SearchInput`, `ToggleGroup`, `Alert`, `AsyncState`) and `theme.css`.
+- `web/src/shared/`: feature-agnostic TypeScript utilities such as undo history and bounded JSON parsing.
+- `web/src/layout/`, `lora/`, `resolution/`, `settings/`: one folder per feature. Model-specific layout code lives in `layout/ideogram/` and `layout/moss/`.
+
+### Frontend Naming
+
+- Each feature has one view named `<Feature>Editor.svelte` (`LayoutEditor`, `LoraEditor`, `PresetEditor`, `ShortcutEditor`). Modal views render inside `ui/Dialog.svelte` and take an `onclose` callback.
+- `*Panel.svelte` is a sidebar or dialog section, `*Field.svelte` a labelled form control, `*Input.svelte` a bare input.
+- `api.ts` holds HTTP requests built on `requestJson`, `store.ts` holds Svelte stores, and `state.ts` holds schemas and pure state transforms.
+- Reuse `ui/` components and `theme.css` classes (`primary`, `icon-button`, `with-icon`, `empty-state`, `sr-only`) before adding view-local equivalents.
 
 ## Python
 
@@ -48,6 +58,7 @@ Before considering frontend work done, run from `web/`:
 - `pnpm run lint`
 - `pnpm run typecheck`
 - `pnpm run build`
+- `pnpm test`
 
 Use `pnpm` for frontend dependency changes.
 

@@ -1,18 +1,17 @@
 <script lang="ts">
-  import ImageEditor from "@/ImageEditor.svelte";
+  import LayoutEditor from "@/layout/LayoutEditor.svelte";
+  import LoraEditor from "@/lora/LoraEditor.svelte";
   import PresetEditor from "@/resolution/PresetEditor.svelte";
-  import { presetManagerOpen } from "@/resolution/library";
-  import StrengthEditor from "@/lora/StrengthEditor.svelte";
-  import { loraEditorNode } from "@/lora/services";
-  import "@/editor/theme.css";
+  import { loraEditorNode, presetEditorOpen } from "@/views";
+  import "@/ui/theme.css";
 </script>
 
-<ImageEditor />
-{#if $presetManagerOpen}
-  <PresetEditor oncancel={() => presetManagerOpen.set(false)} />
+<LayoutEditor />
+{#if $presetEditorOpen}
+  <PresetEditor onclose={() => presetEditorOpen.set(false)} />
 {/if}
 {#if $loraEditorNode}
   {#key $loraEditorNode}
-    <StrengthEditor node={$loraEditorNode} oncancel={() => loraEditorNode.set(null)} />
+    <LoraEditor node={$loraEditorNode} onclose={() => loraEditorNode.set(null)} />
   {/key}
 {/if}

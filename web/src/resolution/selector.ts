@@ -1,18 +1,14 @@
 import type { ComfyNode } from "@/comfy/types";
-import { readWidgetValue, writeWidgetValue } from "@/editor/services";
-import { presetLibrary } from "./library";
-import type { ResolutionPreset } from "./presets";
+import { findWidget, readWidgetValue, writeWidgetValue } from "@/comfy/nodes";
+import { presetLibrary } from "./store";
+import type { ResolutionPreset } from "./api";
 
 export const RESOLUTION_SELECTOR_NODE_ID = "Neriss_ResolutionSelector";
 const subscriptions = new WeakMap<ComfyNode, () => void>();
 
-export function isResolutionSelectorNode(node: ComfyNode): boolean {
-  return node.comfyClass === RESOLUTION_SELECTOR_NODE_ID || node.type === RESOLUTION_SELECTOR_NODE_ID;
-}
-
 export function connectResolutionSelector(node: ComfyNode) {
   if (subscriptions.has(node)) return;
-  const widget = node.widgets?.find((item) => item.name === "preset");
+  const widget = findWidget(node, "preset");
   if (!widget) return;
 
   let presets: ResolutionPreset[] = [];

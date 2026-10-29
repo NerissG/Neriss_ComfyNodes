@@ -3,13 +3,12 @@
   import { z } from "zod";
   import type { ComfyNode } from "@/comfy/types";
   import App from "@/App.svelte";
-  import { openResolutionPresetManager } from "@/resolution/library";
   import { connectResolutionSelector, RESOLUTION_SELECTOR_NODE_ID } from "@/resolution/selector";
-  import { editorNodeIds, OPEN_EDITOR_EVENT } from "@/editor/models";
-  import { stringifyEditorState, type EditorModel } from "@/editor/state";
-  import { previewState } from "./fixtures";
+  import { editorNodeIds } from "@/layout/models";
+  import { stringifyEditorState, type EditorModel } from "@/layout/state";
   import { emptyStrengthState, LORA_NODE_ID } from "@/lora/state";
-  import { openLoraEditor } from "@/lora/services";
+  import { openLayoutEditor, openLoraEditor, openPresetEditor } from "@/views";
+  import { previewState } from "./fixtures";
 
   const params = new URLSearchParams(window.location.search);
   const requestedModel = z.enum(["moss", "ideogram"]).catch("moss").parse(params.get("model"));
@@ -89,12 +88,12 @@
 
   function open(model: EditorModel) {
     node.comfyClass = editorNodeIds[model];
-    window.dispatchEvent(new CustomEvent(OPEN_EDITOR_EVENT, { detail: { node } }));
+    openLayoutEditor(node);
   }
   onMount(() => {
     connectResolutionSelector(selector);
     if (params.get("lora") === "1") openLoraEditor(loraNode);
-    else if (params.get("manager") === "1") openResolutionPresetManager();
+    else if (params.get("manager") === "1") openPresetEditor();
     else open(requestedModel);
     return () => selector.onRemoved?.call(selector);
   });
@@ -105,7 +104,7 @@
   <p>This page uses the real editor with a local mock node. It does not connect to ComfyUI.</p>
   <button type="button" onclick={() => open("moss")}>Open MOSS editor</button>
   <button type="button" onclick={() => open("ideogram")}>Open Ideogram editor</button>
-  <button type="button" onclick={openResolutionPresetManager}>Manage AR Presets</button>
+  <button type="button" onclick={openPresetEditor}>Manage AR Presets</button>
   <button type="button" onclick={() => openLoraEditor(loraNode)}>Open Strength Editor</button>
   <label
     >Preview LoRA

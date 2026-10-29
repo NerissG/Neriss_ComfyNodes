@@ -2,7 +2,7 @@ import { ResultAsync, err, okAsync } from "neverthrow";
 import { readonly, writable } from "svelte/store";
 import { editorErrors, type AppError } from "@/errors";
 import { defaultUiSettings, uiSettingsSchema, type EditorPreferences, type UiSettings } from "./schema";
-import { loadUiSettings, saveUiSettings } from "./services";
+import { loadUiSettings, saveUiSettings } from "./api";
 
 type SettingsState = {
   settings: UiSettings;

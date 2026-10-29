@@ -204,6 +204,21 @@ test("late target responses cannot replace the newly selected LoRA", async ({ pa
   await expect(page.getByTestId("lora-state")).toContainText('"lora_name":"demo.safetensors"');
 });
 
+test("ComfyUI's litegraph dialog rule does not move the editor off center", async ({ page }) => {
+  await page.goto("/preview/index.html?lora=1");
+  // Copied from the ComfyUI frontend, which puts the litegraph class on the page body.
+  await page.addStyleTag({
+    content: `.litegraph .dialog { position: absolute; top: 50%; left: 50%; margin-top: -150px; margin-left: -200px; }`,
+  });
+  await page.evaluate(() => document.body.classList.add("litegraph"));
+  const bounds = await page.getByRole("dialog", { name: "LoRA block strength editor" }).boundingBox();
+  const viewport = page.viewportSize();
+  expect(bounds && viewport).toBeTruthy();
+  if (!bounds || !viewport) return;
+  expect(Math.abs(bounds.x + bounds.width / 2 - viewport.width / 2)).toBeLessThanOrEqual(1);
+  expect(bounds.y).toBe(24);
+});
+
 test("host dialog shadows and window focus outlines do not leak into the editor", async ({ page }) => {
   await page.goto("/preview/index.html?lora=1");
   await page.addStyleTag({
@@ -230,7 +245,7 @@ test("opening focuses search instead of selecting the LoRA name, and CLIP stays 
 }) => {
   await page.goto("/preview/index.html?lora=1");
   const modal = page.getByRole("dialog", { name: "LoRA block strength editor" });
-  await expect(modal.getByRole("textbox", { name: "Search LoRA targets" })).toBeFocused();
+  await expect(modal.getByRole("searchbox", { name: "Search LoRA targets" })).toBeFocused();
   await expect(bar(modal, block0)).toBeVisible();
   await expect(modal.getByRole("spinbutton", { name: "MODEL strength", exact: true })).toBeVisible();
   await expect(modal.getByRole("spinbutton", { name: "CLIP strength", exact: true })).toHaveCount(0);
@@ -259,9 +274,9 @@ test("chart edits, module inheritance, selection and filters", async ({ page }) 
   await expect(bar(modal, block10)).toHaveClass(/dim/);
   await expect(bar(modal, block0)).not.toHaveClass(/dim/);
   await modal.getByRole("button", { name: "Changed", exact: true }).click();
-  await modal.getByRole("textbox", { name: "Search LoRA targets" }).fill("attn.q");
+  await modal.getByRole("searchbox", { name: "Search LoRA targets" }).fill("attn.q");
   await expect(bar(modal, block10)).not.toHaveClass(/dim/);
-  await modal.getByRole("textbox", { name: "Search LoRA targets" }).fill("Block 10");
+  await modal.getByRole("searchbox", { name: "Search LoRA targets" }).fill("Block 10");
   await expect(bar(modal, block0)).toHaveClass(/dim/);
 });
 
@@ -491,7 +506,7 @@ test("realistic underscore families stay compact on desktop and mobile", async (
   await expect(bar(modal, "lora_unet_blocks_27")).toHaveCount(0);
   await bar(modal, "lora_unet_llm_adapter_blocks_0").click();
   await modal.screenshot({ path: testInfo.outputPath("lora-chart-modules.png") });
-  await modal.getByRole("textbox", { name: "Search block modules", exact: true }).fill("to_q");
+  await modal.getByRole("searchbox", { name: "Search block modules", exact: true }).fill("to_q");
   await expect(
     modal.getByRole("spinbutton", { name: "Multiplier lora_unet_llm_adapter_blocks_0_attn_to_q", exact: true }),
   ).toBeVisible();

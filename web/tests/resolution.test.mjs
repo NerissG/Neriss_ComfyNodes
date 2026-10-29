@@ -8,10 +8,10 @@ import { get } from "svelte/store";
 
 const server = await createServer({ server: { middlewareMode: true, ws: false }, appType: "custom" });
 after(() => server.close());
-const { createPresetLibrary, presetLibrary } = await server.ssrLoadModule("/src/resolution/library.ts");
+const { createPresetLibrary, presetLibrary } = await server.ssrLoadModule("/src/resolution/store.ts");
 const { connectResolutionSelector } = await server.ssrLoadModule("/src/resolution/selector.ts");
 const { calculateResolution } = await server.ssrLoadModule("/src/resolution/sizing.ts");
-const { saveResolutionPresets } = await server.ssrLoadModule("/src/resolution/presets.ts");
+const { saveResolutionPresets } = await server.ssrLoadModule("/src/resolution/api.ts");
 const { comfyErrors } = await server.ssrLoadModule("/src/errors.ts");
 const original = [{ name: "Square", x: 1, y: 1 }];
 const edited = [{ name: "Portrait", x: 3, y: 5 }];

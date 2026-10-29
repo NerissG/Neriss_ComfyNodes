@@ -1,74 +1,45 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
-  import { on } from "svelte/events";
   import { formatAppError } from "@/errors";
-  import { presetLibrary } from "./library";
-  import type { ResolutionPreset } from "./presets";
+  import Alert from "@/ui/Alert.svelte";
+  import AsyncState from "@/ui/AsyncState.svelte";
+  import Dialog from "@/ui/Dialog.svelte";
+  import Icon from "@/ui/Icon.svelte";
+  import type { ResolutionPreset } from "./api";
+  import { presetLibrary } from "./store";
 
-  export let oncancel: () => void;
-  let dialog: HTMLDialogElement;
+  let { onclose }: { onclose: () => void } = $props();
+  let form: HTMLFormElement;
   let mounted = false;
+  let drafts = $state<(ResolutionPreset & { id: string })[]>([]);
+  let saved = $state<ResolutionPreset[]>([]);
+  let loading = $state(true);
+  let saving = $state(false);
+  let error = $state("");
+  let conflict = $state(false);
+  let confirmReload = $state(false);
+  let announcement = $state("");
+  let draggingId = $state<string | null>(null);
+  let dropTarget = $state<{ id: string; after: boolean } | null>(null);
+  const presetName = ({ name, x, y }: ResolutionPreset): string => name.trim() || `${x}:${y}`;
+  const entries = $derived(drafts.map((draft) => ({ name: presetName(draft), x: draft.x, y: draft.y })));
+  const dirty = $derived(JSON.stringify(entries) !== JSON.stringify(saved));
+  const duplicates = $derived(
+    new Set(
+      entries
+        .filter((entry, index) => entries.findIndex((other) => other.name === entry.name) !== index)
+        .map((entry) => entry.name),
+    ),
+  );
+
   onMount(() => {
     mounted = true;
-    const opener = document.activeElement;
-    dialog.showModal();
     void load();
-    // Let the native modal own focus and keyboard navigation, without editor shortcuts.
-    const keydown = on(dialog, "keydown", (event) => {
-      if (event.key === "Tab") {
-        const controls = Array.from(
-          dialog.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled)"),
-        );
-        const first = controls[0];
-        const last = controls.at(-1);
-        if (event.shiftKey && document.activeElement === first) {
-          event.preventDefault();
-          last?.focus();
-        } else if (!event.shiftKey && document.activeElement === last) {
-          event.preventDefault();
-          first?.focus();
-        }
-      }
-      event.stopPropagation();
-    });
-    const keyup = on(dialog, "keyup", (event) => event.stopPropagation());
-    const removeInputListeners = ["keypress", "paste", "copy", "cut"].map((type) =>
-      on(dialog, type, (event) => event.stopPropagation()),
-    );
     return () => {
       mounted = false;
-      keydown();
-      keyup();
-      for (const remove of removeInputListeners) remove();
-      dialog.close();
-      void tick().then(() => {
-        if (opener instanceof HTMLElement && opener.isConnected) opener.focus({ preventScroll: true });
-      });
     };
   });
-  async function add() {
-    drafts = [...drafts, { id: crypto.randomUUID(), name: "", x: 1, y: 1 }];
-    await tick();
-    dialog.querySelector<HTMLInputElement>(`input[aria-label="Preset ${drafts.length} name"]`)?.focus();
-  }
-  let drafts: (ResolutionPreset & { id: string })[] = [];
-  let saved: ResolutionPreset[] = [];
-  let loading = true;
-  let saving = false;
-  let error = "";
-  let conflict = false;
-  let confirmReload = false;
-  let announcement = "";
-  let draggingId: string | null = null;
-  let dropTarget: { id: string; after: boolean } | null = null;
-  const presetName = ({ name, x, y }: ResolutionPreset): string => name.trim() || `${x}:${y}`;
-  $: entries = drafts.map((draft) => ({ name: presetName(draft), x: draft.x, y: draft.y }));
-  $: dirty = JSON.stringify(entries) !== JSON.stringify(saved);
-  $: duplicates = new Set(
-    entries
-      .filter((entry, index) => entries.findIndex((other) => other.name === entry.name) !== index)
-      .map((entry) => entry.name),
-  );
+
   async function load(retry = false) {
     loading = true;
     error = "";
@@ -93,39 +64,34 @@
     if (result.isErr()) {
       error = formatAppError(result.error);
       conflict = result.error.details?.status === 409;
-    } else oncancel();
+    } else onclose();
+  }
+  async function add() {
+    drafts.push({ id: crypto.randomUUID(), name: "", x: 1, y: 1 });
+    await tick();
+    form.querySelector<HTMLInputElement>(`input[aria-label="Preset ${drafts.length} name"]`)?.focus();
   }
   async function move(index: number, target: number) {
     if (saving || index === target || target < 0 || target >= drafts.length) return;
     const focused = document.activeElement;
-    const next = [...drafts];
-    const [preset] = next.splice(index, 1);
+    const [preset] = drafts.splice(index, 1);
     if (!preset) return;
-    next.splice(target, 0, preset);
-    drafts = next;
+    drafts.splice(target, 0, preset);
     announcement = `${presetName(preset)} moved to position ${target + 1} of ${drafts.length}.`;
     await tick();
     if (focused instanceof HTMLElement && focused.isConnected) focused.focus({ preventScroll: true });
   }
-  function swap(index: number) {
-    drafts = drafts.map((draft, position) =>
-      position === index
-        ? {
-            ...draft,
-            name: draft.name.trim() === `${draft.x}:${draft.y}` ? `${draft.y}:${draft.x}` : draft.name,
-            x: draft.y,
-            y: draft.x,
-          }
-        : draft,
-    );
+  function swap(draft: ResolutionPreset) {
+    if (draft.name.trim() === `${draft.x}:${draft.y}`) draft.name = `${draft.y}:${draft.x}`;
+    [draft.x, draft.y] = [draft.y, draft.x];
   }
-  function dragOver(event: DragEvent, id: string) {
+  function dragOver(event: DragEvent & { currentTarget: HTMLElement }, id: string) {
     if (!draggingId || saving) return;
     event.preventDefault();
     event.stopPropagation();
     if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
-    const bounds = event.currentTarget instanceof HTMLElement ? event.currentTarget.getBoundingClientRect() : null;
-    dropTarget = draggingId === id || !bounds ? null : { id, after: event.clientY > bounds.top + bounds.height / 2 };
+    const bounds = event.currentTarget.getBoundingClientRect();
+    dropTarget = draggingId === id ? null : { id, after: event.clientY > bounds.top + bounds.height / 2 };
   }
   function clearDrag() {
     draggingId = null;
@@ -143,17 +109,9 @@
   }
 </script>
 
-<dialog
-  bind:this={dialog}
-  class="preset-modal neriss-editor-theme"
-  aria-label="Manage aspect-ratio presets"
-  oncancel={(event) => {
-    event.preventDefault();
-    if (!saving) oncancel();
-  }}
->
+<Dialog label="Manage aspect-ratio presets" width={600} busy={saving} {onclose}>
   <form
-    class="preset-editor"
+    bind:this={form}
     onsubmit={(event) => {
       event.preventDefault();
       void save();
@@ -166,15 +124,15 @@
       </div>
       <div class="button-row">
         {#if dirty}<span class="status">Unsaved changes</span>{/if}
-        <button type="button" class="quiet" disabled={saving} onclick={oncancel}>Cancel</button>
-        <button type="submit" class="save-presets" disabled={saving || loading || conflict || !drafts.length}
+        <button type="button" class="quiet" disabled={saving} onclick={onclose}>Cancel</button>
+        <button type="submit" class="primary" disabled={saving || loading || conflict || !drafts.length}
           >{saving ? "Saving…" : "Save presets"}</button
         >
       </div>
     </header>
     {#if (error && drafts.length) || conflict}
       <div class="feedback">
-        {#if error && drafts.length}<p class="field-error" role="alert">{error}</p>{/if}
+        {#if error && drafts.length}<Alert message={error} />{/if}
         {#if conflict}
           <p>Your draft has not been saved or replaced. Reload the latest presets before saving again.</p>
           {#if confirmReload}
@@ -192,12 +150,13 @@
       </div>
     {/if}
     <div class="preset-rows" role="group" aria-label="Presets" aria-disabled={saving} aria-busy={loading}>
-      {#if loading}
-        <p role="status">Loading your presets…</p>
-      {:else if !drafts.length}
-        <p class="field-error" role="alert">{error}</p>
-        <button type="button" onclick={() => void load(true)}>Retry loading presets</button>
-      {:else}
+      <AsyncState
+        loading={loading && !drafts.length}
+        error={drafts.length ? "" : error}
+        loadingText="Loading your presets…"
+        retryText="Retry loading presets"
+        onretry={() => void load(true)}
+      >
         {#each drafts as draft, index (draft.id)}
           <div
             class="preset-draft"
@@ -274,59 +233,38 @@
             </div>
             <button
               type="button"
-              class="quiet icon-button"
+              class="icon-button reveal"
               disabled={saving || draft.x === draft.y}
               aria-label={`Swap preset ${index + 1} orientation`}
               title="Swap orientation"
-              onclick={() => swap(index)}
-              ><svg viewBox="0 0 24 24" aria-hidden="true"
-                ><path d="M7 4v16m0 0-3-3m3 3 3-3M17 20V4m0 0-3 3m3-3 3 3" /></svg
-              ></button
+              onclick={() => swap(draft)}><Icon name="swap-vertical" size={15} /></button
             >
             <button
               type="button"
-              class="quiet icon-button delete"
+              class="icon-button reveal delete"
               disabled={saving || drafts.length === 1}
               aria-label={`Delete preset ${index + 1}`}
               title="Delete preset"
-              onclick={() => (drafts = drafts.filter((_, position) => position !== index))}
-              ><svg viewBox="0 0 24 24" aria-hidden="true"
-                ><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" /></svg
-              ></button
+              onclick={() => drafts.splice(index, 1)}><Icon name="trash" size={15} /></button
             >
           </div>
         {/each}
-      {/if}
+      </AsyncState>
     </div>
     {#if drafts.length}
-      <button type="button" class="add-preset" disabled={saving || loading} onclick={add}
-        ><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>Add preset</button
+      <button type="button" class="add-preset with-icon" disabled={saving || loading} onclick={add}
+        ><Icon name="plus" size={15} />Add preset</button
       >
     {/if}
     <p class="sr-only" role="status" aria-live="polite">{announcement}</p>
   </form>
-</dialog>
+</Dialog>
 
 <style>
-  .preset-modal {
-    pointer-events: auto;
-    width: min(600px, calc(100vw - 32px));
-    max-width: none;
-    max-height: calc(100dvh - 32px);
-    margin: auto;
-    padding: 0;
-    overflow: hidden;
-    border: 1px solid var(--border-strong);
-    border-radius: 12px;
-    background: var(--surface-1);
-    box-shadow: 0 24px 80px #0008;
-  }
-  .preset-modal::backdrop {
-    background: var(--backdrop);
-  }
-  .preset-editor {
+  form {
     display: flex;
     flex-direction: column;
+    min-height: 0;
     max-height: min(720px, calc(100dvh - 36px));
   }
   header,
@@ -358,15 +296,6 @@
     font-size: 12px;
     color: var(--muted);
   }
-  .preset-modal .save-presets {
-    background: var(--accent);
-    border-color: var(--accent);
-    color: var(--accent-ink);
-    font-weight: 500;
-  }
-  .preset-modal .save-presets:hover {
-    filter: brightness(1.08);
-  }
   .feedback {
     padding: 10px 20px;
     font-size: 12px;
@@ -374,9 +303,6 @@
   .feedback p {
     margin: 0 0 8px;
     color: var(--muted);
-  }
-  .feedback .field-error {
-    color: var(--danger);
   }
   .feedback .button-row {
     flex-wrap: wrap;
@@ -419,7 +345,7 @@
   .preset-draft.drop-after::after {
     bottom: 0;
   }
-  .preset-modal .drag-handle {
+  .drag-handle {
     cursor: grab;
     padding: 4px 0;
     font-size: 16px;
@@ -471,41 +397,19 @@
     appearance: none;
     margin: 0;
   }
-  .preset-modal .icon-button {
-    display: inline-flex;
-    justify-content: center;
-    align-items: center;
-    width: 28px;
-    height: 28px;
-    padding: 0;
-    color: var(--muted);
+  .reveal {
     opacity: 0;
   }
-  .preset-draft:is(:hover, :focus-within) .icon-button {
+  .preset-draft:is(:hover, :focus-within) .reveal {
     opacity: 1;
   }
-  .preset-draft:is(:hover, :focus-within) .icon-button:disabled {
+  .preset-draft:is(:hover, :focus-within) .reveal:disabled {
     opacity: 0.38;
   }
-  .preset-modal .icon-button:hover {
-    color: var(--text);
-  }
-  .preset-modal .delete:hover {
+  .delete:hover {
     color: var(--danger);
   }
-  svg {
-    width: 15px;
-    height: 15px;
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 1.7;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-    flex-shrink: 0;
-  }
-  .preset-modal .add-preset {
-    display: flex;
-    align-items: center;
+  .add-preset {
     gap: 8px;
     flex-shrink: 0;
     margin: 6px 18px 16px;
@@ -514,24 +418,15 @@
     background: transparent;
     color: var(--muted);
   }
-  .preset-modal .add-preset:hover {
+  .add-preset:hover {
     background: var(--accent-bg);
     color: var(--accent);
   }
-  .sr-only {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    padding: 0;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
-  }
   @media (hover: none) {
-    .preset-modal .icon-button {
+    .reveal {
       opacity: 1;
     }
-    .preset-modal .icon-button:disabled {
+    .reveal:disabled {
       opacity: 0.38;
     }
   }
@@ -554,7 +449,7 @@
       width: 44px;
       padding: 5px 4px;
     }
-    .preset-modal .add-preset {
+    .add-preset {
       margin: 6px 10px 12px;
     }
   }

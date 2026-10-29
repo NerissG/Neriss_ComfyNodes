@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { EditorModel } from "@/editor/state";
+import type { EditorModel } from "@/layout/state";
 
 const modifierSchema = z.enum(["Mod", "Control", "Meta", "Alt", "Shift"]);
 export type Modifier = z.infer<typeof modifierSchema>;

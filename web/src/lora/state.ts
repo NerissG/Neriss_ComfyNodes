@@ -1,6 +1,6 @@
 import { err, ok } from "neverthrow";
 import { z } from "zod";
-import { parseBoundedJson } from "@/editor/limits";
+import { parseBoundedJson } from "@/shared/json";
 import { editorErrors } from "@/errors";
 
 export const LORA_NODE_ID = "Neriss_LoraBlockStrengthEditor";

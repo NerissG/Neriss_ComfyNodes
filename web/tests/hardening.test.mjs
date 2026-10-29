@@ -6,12 +6,12 @@ import { createServer } from "vite";
 
 const server = await createServer({ server: { middlewareMode: true, ws: false }, appType: "custom" });
 after(() => server.close());
-const { createInitialState, parseEditorState, encodeEditorState } = await server.ssrLoadModule("/src/editor/state.ts");
-const { importIdeogramText } = await server.ssrLoadModule("/src/ideogram/prompt.ts");
-const { importMossText } = await server.ssrLoadModule("/src/moss/prompt.ts");
-const { parseBoundedJson } = await server.ssrLoadModule("/src/editor/limits.ts");
+const { createInitialState, parseEditorState, encodeEditorState } = await server.ssrLoadModule("/src/layout/state.ts");
+const { importIdeogramText } = await server.ssrLoadModule("/src/layout/ideogram/prompt.ts");
+const { importMossText } = await server.ssrLoadModule("/src/layout/moss/prompt.ts");
+const { parseBoundedJson } = await server.ssrLoadModule("/src/shared/json.ts");
 const { fetchLibrary, configureComfyApi, comfyUrl } = await server.ssrLoadModule("/src/comfy/api.ts");
-const { saveResolutionPresets } = await server.ssrLoadModule("/src/resolution/presets.ts");
+const { saveResolutionPresets } = await server.ssrLoadModule("/src/resolution/api.ts");
 const cases = JSON.parse(
   await readFile(new URL("../../tests/fixtures/hardening_validation.json", import.meta.url), "utf8"),
 );
