@@ -9,6 +9,8 @@ import { encodeEditorState, parseEditorState, type EditorState } from "@/editor/
 import { editorModel, editorNodeIds, importPromptText, OPEN_EDITOR_EVENT, STATE_UPDATED_EVENT } from "@/editor/models";
 import { readWidgetValue, writeWidgetValue } from "@/editor/services";
 import { openResolutionPresetManager } from "@/resolution/library";
+import { LORA_NODE_ID } from "@/lora/state";
+import { openLoraEditor } from "@/lora/services";
 import {
   connectResolutionSelector,
   isResolutionSelectorNode,
@@ -116,6 +118,12 @@ function ensureResolutionSelectorControls(node: ComfyNode) {
   connectResolutionSelector(node);
 }
 
+function ensureLoraControls(node: ComfyNode) {
+  if (node.comfyClass !== LORA_NODE_ID && node.type !== LORA_NODE_ID) return;
+  hideWidget(node, "state_json");
+  addButton(node, "Open Strength Editor", () => openLoraEditor(node));
+}
+
 function ensureOpenEditorButton(node: ComfyNode) {
   if (!editorModel(node)) return;
   hideWidget(node, "state_json");
@@ -151,6 +159,14 @@ if (comfyModuleResult.isOk()) {
     async beforeRegisterNodeDef(nodeType: ComfyNodeType, nodeData: ComfyNodeData) {
       const nodeDataResult = parseComfyNodeData(nodeData);
       if (nodeDataResult.isErr()) return;
+      if (nodeDataResult.value.name === LORA_NODE_ID) {
+        const originalOnNodeCreated = nodeType.prototype.onNodeCreated;
+        nodeType.prototype.onNodeCreated = function onNodeCreated() {
+          originalOnNodeCreated?.call(this);
+          ensureLoraControls(this);
+        };
+        return;
+      }
       if (nodeDataResult.value.name === RESOLUTION_SELECTOR_NODE_ID) {
         const originalOnNodeCreated = nodeType.prototype.onNodeCreated;
         nodeType.prototype.onNodeCreated = function onNodeCreated() {
@@ -189,6 +205,7 @@ if (comfyModuleResult.isOk()) {
     async nodeCreated(node) {
       ensureOpenEditorButton(node);
       ensureResolutionSelectorControls(node);
+      ensureLoraControls(node);
     },
   });
 } else {

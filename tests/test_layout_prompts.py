@@ -561,6 +561,7 @@ class LayoutPromptTests(unittest.TestCase):
                 "Neriss_MossLayoutPromptEditor",
                 "Neriss_ResolutionSelector",
                 "Neriss_ScaleImageToMegapixels",
+                "Neriss_LoraBlockStrengthEditor",
             },
         )
         self.assertTrue(all(schema.category.startswith("Neriss/") for schema in schemas.values()))

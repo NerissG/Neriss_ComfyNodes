@@ -19,8 +19,22 @@ To update, run `git pull --ff-only` inside `Neriss_ComfyNodes`, then restart and
 - **🔨 MOSS Layout Prompt Editor** — the same visual editor for experimental MOSS-Image-Base layout prompts, with object, character and text regions. Every region needs a bounding box before export.
 - **🔨 Resolution Selector** — calculate width and height from an aspect-ratio preset or custom ratio, using a megapixel target or square-side target. Supports flipping and rounding to a chosen multiple.
 - **🔨 Scale Image to Megapixels** — resize an image batch to a megapixel or square-side target, with selectable interpolation, optional cropping and mask resizing.
+- **🔨 LoRA Block Strength Editor** — load a safetensors LoRA with a compact block grid, discovered block families, block/module multipliers, and separate global MODEL/CLIP strengths. No fixed model-family block layouts.
 
 On either prompt node, click **Open Layout Editor**. Connect `json_prompt` to your model's prompt input and use the node's `width` and `height` for generation. Both editors also output a reference/grid image, an annotated preview and pixel bounding boxes.
+
+### LoRA block strengths
+
+Connect a MODEL and optionally CLIP to **LoRA Block Strength Editor**, select an installed `.safetensors` LoRA, then click **Open Strength Editor**. The header dropdown also selects a LoRA; each file keeps a separate draft while the editor is open, and the node's selection changes only when you apply. Filter the grid by block family or search modules, adjust multipliers, and click **Apply strengths**. Click a block's name to edit its modules. Use the node's MODEL/CLIP outputs instead of an additional loader for the same LoRA.
+
+Click the LoRA picker and type filename or folder terms (for example `anima style gpt`). Results match all terms in any order, show folders separately, and remain responsive for large libraries. Arrow keys navigate, Enter selects, and Escape closes the picker without closing the editor.
+
+- A target's effective patch strength is its MODEL/CLIP global strength times its most specific multiplier. A module override replaces its parent multiplier; unedited targets inherit their parent or `1`. Zero skips a patch; negative values are allowed. The ↺ control restores inheritance.
+- Use **Changed** to show edited blocks. Select blocks to set their multipliers together; module overrides remain intact. **Reset selected** clears block and module overrides in the selection. Numeric ± buttons step by `0.05`; arrow keys support Shift (`0.1`) and Alt (`0.01`).
+- Changes are drafts until applied. The workflow stores multipliers and the LoRA selection; switching files with active overrides requires an explicit reset. Renaming/replacing a file does not guarantee its old target rules still apply.
+- The editor reads safetensors headers without loading weights or the connected model. Actual target resolution uses ComfyUI's LoRA mappings and patch loader at execution, including supported text-encoder targets. An incompatible LoRA cannot be made compatible by changing its strengths.
+- The `report` output is JSON with resolved/applied patch counts, unmatched targets, unused overrides, and unrecognized keys. Inspect it when trying a new model/adapter format. Targets missing from an omitted CLIP are reported as unmatched.
+- This first version handles recognized LoRA/DoRA, LyCORIS adapter suffixes and additive diff patches through ComfyUI. Format recognition is not a guarantee that every adapter variant or quantized model works. Weight-replacement and configuration adapters are explicitly rejected; use ComfyUI's standard loader for those. Preset libraries and architecture-specific labels are not included yet.
 
 ## Development
 

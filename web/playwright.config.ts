@@ -26,6 +26,10 @@ export default defineConfig({
   },
   projects: [
     { name: "preflight", testMatch: "preflight.spec.ts" },
-    { name: "chromium", testMatch: ["editor.spec.ts", "hardening.spec.ts"], dependencies: ["preflight"] },
+    {
+      name: "chromium",
+      testMatch: ["editor.spec.ts", "hardening.spec.ts", "lora.spec.ts"],
+      dependencies: ["preflight"],
+    },
   ],
 });

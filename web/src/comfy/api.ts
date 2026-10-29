@@ -15,7 +15,8 @@ export function configureComfyApi(value: unknown) {
 
 export function comfyUrl(route: string): string {
   const base = typeof document === "undefined" ? "http://localhost/" : document.baseURI;
-  return new URL(route.replace(/^\//, ""), base).pathname;
+  const url = new URL(route.replace(/^\//, ""), base);
+  return `${url.pathname}${url.search}`;
 }
 
 export function fetchComfy(route: string, options?: RequestInit): Promise<Response> {

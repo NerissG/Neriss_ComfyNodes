@@ -26,6 +26,7 @@ with patch.object(PromptServer, "instance", SimpleNamespace(routes=web.RouteTabl
     ideogram = importlib.import_module(f"{ROOT.name}.nodes.image_editor")
     resolution = importlib.import_module(f"{ROOT.name}.nodes.resolution_selector")
     resize = importlib.import_module(f"{ROOT.name}.nodes.image_resize_megapixels")
+    lora = importlib.import_module(f"{ROOT.name}.nodes.lora_strength_editor")
     layout = importlib.import_module(f"{ROOT.name}.shared.layout_editor")
     ui_settings = importlib.import_module(f"{ROOT.name}.shared.ui_settings")
     limits = importlib.import_module(f"{ROOT.name}.shared.limits")
