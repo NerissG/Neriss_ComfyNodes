@@ -5,8 +5,21 @@ import { createServer } from "vite";
 const server = await createServer({ server: { middlewareMode: true, ws: false }, appType: "custom" });
 after(() => server.close());
 const { targetGroups, targetMultiplier, parseStrengthState } = await server.ssrLoadModule("/src/lora/state.ts");
-const { buildBlockFamilies, blockChanged, filterBlockFamilies, setBlockMultipliers, resetBlockMultipliers } =
-  await server.ssrLoadModule("/src/lora/blocks.ts");
+const {
+  buildBlockFamilies,
+  blockChanged,
+  filterBlockFamilies,
+  setBlockMultipliers,
+  clearOverrides,
+  hasOverridesWithin,
+  familyTargets,
+  familyModules,
+  weightChanges,
+  formatWeights,
+  parseWeights,
+  chartRange,
+  hasClipTargets,
+} = await server.ssrLoadModule("/src/lora/blocks.ts");
 const { comfyUrl } = await server.ssrLoadModule("/src/comfy/api.ts");
 const { loraChoices } = await server.ssrLoadModule("/src/lora/services.ts");
 const { prepareLoraChoices, filterLoraChoices } = await server.ssrLoadModule("/src/lora/picker.ts");
@@ -88,6 +101,10 @@ test("families discover dotted and underscore blocks without architecture tables
     blocks.blocks.map((block) => block.label),
     ["Block 02", "Block 10"],
   );
+  assert.deepEqual(
+    blocks.blocks.map((block) => block.short),
+    ["02", "10"],
+  );
   assert.equal(blocks.blocks[0].targets.length, 2);
   assert.deepEqual(
     blocks.blocks[0].controls.map((control) => control.label),
@@ -135,14 +152,47 @@ test("changed filter includes module overrides, explicit defaults and inherited 
   assert.equal(filterBlockFamilies(families, "", true, { "blocks.0.attn.q": 0 })[0].blocks.length, 1);
 });
 
-test("bulk edits keep module overrides; resetting selected blocks leaves unrelated rules intact", () => {
-  const families = buildBlockFamilies(["blocks.0.attn.q", "blocks.1.attn.q"]);
-  const original = { blocks: 0.9, "blocks.0.attn.q": 0.2, "blocks.1": 0.8 };
+test("bulk edits keep module overrides; clearing names removes nested rules and leaves unrelated ones", () => {
+  const original = { blocks: 0.9, "blocks.0.attn.q": 0.2, "blocks.1": 0.8, "blocks.10": 0.5 };
   const edited = setBlockMultipliers(original, ["blocks.0"], 0);
   assert.equal(edited["blocks.0"], 0);
   assert.equal(edited["blocks.0.attn.q"], 0.2);
   assert.equal(original["blocks.0"], undefined);
-  assert.deepEqual(resetBlockMultipliers(edited, [families[0].blocks[0]]), { blocks: 0.9, "blocks.1": 0.8 });
+  assert.deepEqual(clearOverrides(edited, ["blocks.0"]), { blocks: 0.9, "blocks.1": 0.8, "blocks.10": 0.5 });
+  assert.deepEqual(clearOverrides(edited, ["blocks.0.attn.q"]), {
+    blocks: 0.9,
+    "blocks.0": 0,
+    "blocks.1": 0.8,
+    "blocks.10": 0.5,
+  });
+  const underscore = { lora_unet_blocks_1_attn_to_q: 0, lora_unet_blocks_10_attn_to_q: 0.5 };
+  assert.deepEqual(clearOverrides(underscore, ["lora_unet_blocks_1"]), { lora_unet_blocks_10_attn_to_q: 0.5 });
+  assert.equal(hasOverridesWithin(underscore, ["lora_unet_blocks_1"]), true);
+  assert.equal(hasOverridesWithin(underscore, ["lora_unet_blocks_2"]), false);
+});
+
+test("module lenses chart one module across blocks and skip blocks without it", () => {
+  const [family] = buildBlockFamilies([
+    "lora_unet_blocks_0_attn_wq",
+    "lora_unet_blocks_0_mlp_fc1",
+    "lora_unet_blocks_1_attn_wq",
+    "lora_unet_blocks_2_mlp_fc1",
+  ]);
+  assert.deepEqual(familyModules(family), [
+    { label: "attn_wq", count: 2 },
+    { label: "mlp_fc1", count: 2 },
+  ]);
+  assert.deepEqual(
+    familyTargets(family, "").map((target) => target.name),
+    ["lora_unet_blocks_0", "lora_unet_blocks_1", "lora_unet_blocks_2"],
+  );
+  assert.deepEqual(
+    familyTargets(family, "attn_wq").map((target) => [target.block.short, target.name]),
+    [
+      ["00", "lora_unet_blocks_0_attn_wq"],
+      ["01", "lora_unet_blocks_1_attn_wq"],
+    ],
+  );
 });
 
 test("saved strength state rejects malformed, future and invalid numeric values", () => {
@@ -156,4 +206,26 @@ test("saved strength state rejects malformed, future and invalid numeric values"
     assert.equal(parseStrengthState(value).isErr(), true);
   }
   assert.equal(parseStrengthState('{"version":1,"lora_name":"a","overrides":{"q":0}}').isOk(), true);
+});
+
+test("weight vectors round-trip, only override names that change and reject bad lengths or values", () => {
+  const names = ["blocks.0", "blocks.1", "blocks.2"];
+  const overrides = { blocks: 0.5, "blocks.2": 1 };
+  assert.equal(formatWeights(names.map((name) => targetMultiplier(name, overrides))), "0.5,0.5,1");
+  assert.deepEqual(parseWeights(" 0.5, 0 ;1.25 ", 3)._unsafeUnwrap(), [0.5, 0, 1.25]);
+  assert.deepEqual(parseWeights("1 0 -1", 3)._unsafeUnwrap(), [1, 0, -1]);
+  for (const text of ["1,1", "1,1,1,1", "1,x,1", "1,21,1", ""]) assert.equal(parseWeights(text, 3).isErr(), true);
+  assert.deepEqual(weightChanges(names, overrides, [0.5, 0, 1]), { "blocks.1": 0 });
+});
+
+test("chart range keeps 0 to 2 visible and grows for outliers", () => {
+  assert.deepEqual(chartRange([1, 0.5]), { lo: 0, hi: 2 });
+  assert.deepEqual(chartRange([-1, 3]), { lo: -1, hi: 3 });
+});
+
+test("text encoder targets are detected from Comfy's CLIP LoRA key prefixes", () => {
+  assert.equal(hasClipTargets(["lora_te1_text_model_encoder_layers_0_mlp_fc1"]), true);
+  assert.equal(hasClipTargets(["lora_te_text_model_encoder_layers_0_mlp_fc1"]), true);
+  assert.equal(hasClipTargets(["text_encoders.t5xxl.encoder.block.0.q"]), true);
+  assert.equal(hasClipTargets(["lora_unet_llm_adapter_blocks_0_q", "diffusion_model.blocks.0.q"]), false);
 });

@@ -1,7 +1,16 @@
-import { targetGroups, targetMultiplier } from "./state";
+import { err, ok, type Result } from "neverthrow";
+import { z } from "zod";
+import { editorErrors, type EditorError } from "@/errors";
+import { strengthSchema, targetGroups, targetMultiplier } from "./state";
 
 export type ModuleControl = { name: string; label: string; group: boolean };
-export type StrengthBlock = { name: string; label: string; targets: string[]; controls: ModuleControl[] };
+export type StrengthBlock = {
+  name: string;
+  label: string;
+  short: string;
+  targets: string[];
+  controls: ModuleControl[];
+};
 export type BlockFamily = { name: string; label: string; blocks: StrengthBlock[] };
 const order = new Intl.Collator(undefined, { numeric: true });
 
@@ -35,6 +44,7 @@ export function buildBlockFamilies(targets: string[]): BlockFamily[] {
       block = {
         name: blockName,
         label: match ? `Block ${match[1].padStart(2, "0")}` : shortPath(target),
+        short: match ? match[1].padStart(2, "0") : shortPath(target),
         targets: [],
         controls: [],
       };
@@ -90,10 +100,76 @@ export function setBlockMultipliers(
   return { ...overrides, ...Object.fromEntries([...names].map((name) => [name, value])) };
 }
 
-export function resetBlockMultipliers(
+function within(name: string, names: Set<string>): boolean {
+  return names.has(name) || targetGroups(name).some((group) => names.has(group));
+}
+
+/** Removes overrides for `names` and every module nested under them. */
+export function clearOverrides(overrides: Record<string, number>, names: Iterable<string>): Record<string, number> {
+  const scope = new Set(names);
+  return Object.fromEntries(Object.entries(overrides).filter(([name]) => !within(name, scope)));
+}
+
+export function hasOverridesWithin(overrides: Record<string, number>, names: Iterable<string>): boolean {
+  const scope = new Set(names);
+  return Object.keys(overrides).some((name) => within(name, scope));
+}
+
+export function clampStrength(value: number): number {
+  return Math.max(-20, Math.min(20, Number(value.toFixed(4))));
+}
+
+/** The rule each chart bar edits: the block itself, or one module of it when a module lens is active. */
+export type ChartTarget = { block: StrengthBlock; name: string };
+
+export function familyTargets(family: BlockFamily, lens: string): ChartTarget[] {
+  return family.blocks.flatMap((block) => {
+    if (!lens) return [{ block, name: block.name }];
+    const control = block.controls.find((entry) => entry.label === lens);
+    return control ? [{ block, name: control.name }] : [];
+  });
+}
+
+export function familyModules(family: BlockFamily): { label: string; count: number }[] {
+  const counts = new Map<string, number>();
+  for (const block of family.blocks) {
+    for (const control of block.controls) counts.set(control.label, (counts.get(control.label) ?? 0) + 1);
+  }
+  return [...counts].sort(([a], [b]) => order.compare(a, b)).map(([label, count]) => ({ label, count }));
+}
+
+/** Explicit overrides for names whose current multiplier differs from `values`. */
+export function weightChanges(
+  names: string[],
   overrides: Record<string, number>,
-  blocks: StrengthBlock[],
+  values: number[],
 ): Record<string, number> {
-  const names = new Set(blocks.flatMap((block) => [block.name, ...block.controls.map((control) => control.name)]));
-  return Object.fromEntries(Object.entries(overrides).filter(([name]) => !names.has(name)));
+  return Object.fromEntries(
+    names.flatMap((name, index) =>
+      targetMultiplier(name, overrides) === values[index] ? [] : [[name, values[index]]],
+    ),
+  );
+}
+
+export function formatWeights(values: number[]): string {
+  return values.map((value) => String(value)).join(",");
+}
+
+export function parseWeights(text: string, count: number): Result<number[], EditorError> {
+  const values = text
+    .split(/[\s,;]+/)
+    .filter(Boolean)
+    .map(Number);
+  const parsed = z.array(strengthSchema).length(count).safeParse(values);
+  return parsed.success
+    ? ok(parsed.data)
+    : err(editorErrors.runtime(`Enter ${count} comma-separated values from -20 to 20`));
+}
+
+export function chartRange(values: number[]): { lo: number; hi: number } {
+  return { lo: Math.min(0, ...values), hi: Math.max(2, ...values) };
+}
+
+export function hasClipTargets(targets: string[]): boolean {
+  return targets.some((target) => /^(?:lora_te\d*_|lora_prior_te_|text_encoders?\.)/.test(target));
 }

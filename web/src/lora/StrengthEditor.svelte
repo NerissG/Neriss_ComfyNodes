@@ -17,27 +17,34 @@
   import {
     blockChanged,
     buildBlockFamilies,
+    clearOverrides,
+    familyTargets,
     filterBlockFamilies,
-    resetBlockMultipliers,
+    hasClipTargets,
     setBlockMultipliers,
-    type StrengthBlock,
   } from "./blocks";
   import { loadLoraTargets, loraChoices } from "./services";
   import StrengthControl from "./StrengthControl.svelte";
   import LoraPicker from "./LoraPicker.svelte";
+  import FamilyChart from "./FamilyChart.svelte";
 
   export let node: ComfyNode;
   export let oncancel: () => void;
+  type Draft = { state: StrengthState; error: string; past: StrengthState[]; future: StrengthState[] };
   let dialog: HTMLDialogElement;
+  let search: HTMLInputElement;
   const selection = readWidgetValue(node, "lora_name");
   let loraName = typeof selection === "string" ? selection : "";
   const choices = loraChoices(node);
-  const drafts = new SvelteMap<string, { state: StrengthState; error: string }>();
+  const drafts = new SvelteMap<string, Draft>();
   const parsed = parseStrengthState(readWidgetValue(node, "state_json"));
   let state = parsed.isOk() ? parsed.value : emptyStrengthState(loraName);
   let stateError = parsed.isErr()
     ? `${formatAppError(parsed.error)}. Reset explicitly to replace the saved state.`
     : "";
+  let past: StrengthState[] = [];
+  let future: StrengthState[] = [];
+  let historyGroup: string | null = null;
   let modelStrength = strengthSchema.catch(1).parse(readWidgetValue(node, "strength_model"));
   let clipStrength = strengthSchema.catch(1).parse(readWidgetValue(node, "strength_clip"));
   let manifest: LoraManifest | null = null;
@@ -46,7 +53,9 @@
   let query = "";
   let changedOnly = false;
   let activeFamily: string | null = null;
+  let lenses: Record<string, string> = {};
   let selected = new SvelteSet<string>();
+  let anchor: string | null = null;
   let inspecting: string | null = null;
   let moduleQuery = "";
   let bulkValue = 1;
@@ -56,11 +65,26 @@
   $: disabled = mismatch || Boolean(stateError);
   $: families = buildBlockFamilies(manifest?.targets ?? []);
   $: allBlocks = families.flatMap((family) => family.blocks);
-  $: filtered = filterBlockFamilies(families, query, changedOnly, state.overrides);
-  $: visibleFamilies = activeFamily === null ? filtered : filtered.filter((family) => family.name === activeFamily);
-  $: visibleBlocks = visibleFamilies.flatMap((family) => family.blocks);
-  $: allSelected = visibleBlocks.length > 0 && visibleBlocks.every((block) => selected.has(block.name));
-  $: inspected = allBlocks.find((block) => block.name === inspecting);
+  $: matching = new Set(
+    filterBlockFamilies(families, query, changedOnly, state.overrides).flatMap((family) =>
+      family.blocks.map((block) => block.name),
+    ),
+  );
+  $: visibleFamilies = families.filter(
+    (family) =>
+      (activeFamily === null || family.name === activeFamily) &&
+      family.blocks.some((block) => matching.has(block.name)),
+  );
+  $: charts = visibleFamilies.map((family) => ({ family, targets: familyTargets(family, lenses[family.name] ?? "") }));
+  $: visibleTargets = charts.flatMap((chart) =>
+    chart.targets.filter((target) => matching.has(target.block.name)).map((target) => target.name),
+  );
+  $: allSelected = visibleTargets.length > 0 && visibleTargets.every((name) => selected.has(name));
+  $: changedCount = allBlocks.filter((block) => blockChanged(block, state.overrides)).length;
+  $: overrideCount = Object.keys(state.overrides).length;
+  $: showClip = hasClipTargets(manifest?.targets ?? []) || clipStrength !== 1;
+  $: inspectedFamily = families.find((family) => family.blocks.some((block) => block.name === inspecting));
+  $: inspected = inspectedFamily?.blocks.find((block) => block.name === inspecting);
   $: modules =
     inspected?.controls.filter((control) =>
       `${control.name} ${control.label}`.toLowerCase().includes(moduleQuery.trim().toLowerCase()),
@@ -72,10 +96,32 @@
     mounted = true;
     const opener = document.activeElement;
     dialog.showModal();
+    search.focus();
     void load();
-    const cleanup = ["keydown", "keyup", "keypress", "paste", "copy", "cut"].map((type) =>
-      on(dialog, type, (event) => event.stopPropagation()),
-    );
+    const cleanup = [
+      on(dialog, "keydown", keydown),
+      // The dialog is mounted on document.body, so keep the graph's document and window listeners from seeing editor input.
+      ...[
+        "keydown",
+        "keyup",
+        "keypress",
+        "paste",
+        "copy",
+        "cut",
+        "pointerdown",
+        "pointermove",
+        "pointerup",
+        "pointercancel",
+        "mousedown",
+        "mousemove",
+        "mouseup",
+        "click",
+        "dblclick",
+        "auxclick",
+        "contextmenu",
+        "wheel",
+      ].map((type) => on(dialog, type, (event) => event.stopPropagation())),
+    ];
     return () => {
       mounted = false;
       cleanup.forEach((remove) => remove());
@@ -99,59 +145,103 @@
   }
   function selectLora(name: string) {
     if (name === loraName || !choices.includes(name)) return;
-    drafts.set(loraName, { state, error: stateError });
+    drafts.set(loraName, { state, error: stateError, past, future });
     loraName = name;
     const draft = drafts.get(name);
     state = draft?.state ?? emptyStrengthState(name);
     stateError = draft?.error ?? "";
+    past = draft?.past ?? [];
+    future = draft?.future ?? [];
+    historyGroup = null;
     query = "";
     changedOnly = false;
     activeFamily = null;
+    lenses = {};
     selected = new SvelteSet();
+    anchor = null;
     inspecting = null;
     moduleQuery = "";
     void load();
+  }
+  /** Records one undo step per call, or one per run of calls sharing a group such as a paint stroke. */
+  function update(overrides: Record<string, number>, group: string | null = null) {
+    if (group === null || group !== historyGroup) past = [...past.slice(-99), state];
+    future = [];
+    historyGroup = group;
+    state = { version: 1, lora_name: loraName, overrides };
+  }
+  function undo() {
+    const previous = past.at(-1);
+    if (!previous) return;
+    future = [state, ...future];
+    past = past.slice(0, -1);
+    state = previous;
+    historyGroup = null;
+  }
+  function redo() {
+    const next = future[0];
+    if (!next) return;
+    past = [...past, state];
+    future = future.slice(1);
+    state = next;
+    historyGroup = null;
   }
   function change(name: string, value: number | null) {
     const overrides = { ...state.overrides };
     if (value === null) delete overrides[name];
     else overrides[name] = value;
-    state = { version: 1, lora_name: loraName, overrides };
+    update(overrides);
   }
   function reset() {
-    state = emptyStrengthState(loraName);
+    update({});
     stateError = "";
   }
-  function select(name: string, checked: boolean) {
+  function select(name: string, mode: "toggle" | "range") {
     const next = new SvelteSet(selected);
-    if (checked) next.add(name);
-    else next.delete(name);
+    const from = anchor === null ? -1 : visibleTargets.indexOf(anchor);
+    const to = visibleTargets.indexOf(name);
+    if (mode === "range" && from >= 0 && to >= 0) {
+      for (const target of visibleTargets.slice(Math.min(from, to), Math.max(from, to) + 1)) next.add(target);
+    } else if (next.has(name)) next.delete(name);
+    else next.add(name);
+    anchor = name;
     selected = next;
   }
   function selectVisible() {
     const next = new SvelteSet(selected);
-    for (const block of visibleBlocks) {
-      if (allSelected) next.delete(block.name);
-      else next.add(block.name);
+    for (const name of visibleTargets) {
+      if (allSelected) next.delete(name);
+      else next.add(name);
     }
     selected = next;
   }
-  function inspect(block: StrengthBlock) {
-    inspecting = inspecting === block.name ? null : block.name;
-    moduleQuery = "";
+  function inspect(block: string) {
+    if (inspecting !== block) moduleQuery = "";
+    inspecting = block;
+    const family = families.find((entry) => entry.blocks.some((item) => item.name === block));
+    const lens = family ? (lenses[family.name] ?? "") : "";
+    anchor = family ? (familyTargets(family, lens).find((target) => target.block.name === block)?.name ?? null) : null;
+  }
+  function setLens(family: string, lens: string) {
+    lenses = { ...lenses, [family]: lens };
+    selected = new SvelteSet();
+    anchor = null;
   }
   function applyBulk() {
     if (disabled || !selected.size || !strengthSchema.safeParse(bulkValue).success) return;
-    state = { version: 1, lora_name: loraName, overrides: setBlockMultipliers(state.overrides, selected, bulkValue) };
+    update(setBlockMultipliers(state.overrides, selected, bulkValue));
   }
   function resetSelected() {
-    state = {
-      ...state,
-      overrides: resetBlockMultipliers(
-        state.overrides,
-        allBlocks.filter((block) => selected.has(block.name)),
-      ),
-    };
+    update(clearOverrides(state.overrides, selected));
+  }
+  function keydown(event: KeyboardEvent) {
+    if (!(event.ctrlKey || event.metaKey) || disabled) return;
+    if (event.target instanceof HTMLInputElement && event.target.type !== "checkbox") return;
+    const key = event.key.toLowerCase();
+    if (key === "z" && !event.shiftKey) undo();
+    else if (key === "y" || (key === "z" && event.shiftKey)) redo();
+    else return;
+    event.preventDefault();
   }
   function save() {
     if (
@@ -191,7 +281,24 @@
   >
     <header>
       <LoraPicker {choices} value={loraName} onchange={selectLora} />
+      <div class="global">
+        <span>Model</span><StrengthControl
+          label="MODEL strength"
+          value={modelStrength}
+          onchange={(value) => (modelStrength = value)}
+        />
+      </div>
+      {#if showClip}<div class="global">
+          <span>Clip</span><StrengthControl
+            label="CLIP strength"
+            value={clipStrength}
+            onchange={(value) => (clipStrength = value)}
+          />
+        </div>{/if}
       <div class="actions">
+        {#if overrideCount}<span class="dirty" role="status"
+            >{overrideCount} override{overrideCount === 1 ? "" : "s"}</span
+          >{/if}
         <button type="button" class="quiet" onclick={oncancel}>Cancel</button><button
           type="submit"
           class="apply"
@@ -201,28 +308,13 @@
     </header>
     <div class="toolbar">
       <input
+        bind:this={search}
         class="search"
         aria-label="Search LoRA targets"
         placeholder="Find block or module…"
         bind:value={query}
         oninput={() => (activeFamily = null)}
       />
-      <div class="global">
-        <span>Model</span><StrengthControl
-          label="MODEL strength"
-          value={modelStrength}
-          onchange={(value) => (modelStrength = value)}
-        />
-      </div>
-      <div class="global">
-        <span>Clip</span><StrengthControl
-          label="CLIP strength"
-          value={clipStrength}
-          onchange={(value) => (clipStrength = value)}
-        />
-      </div>
-    </div>
-    <div class="navigation">
       <div class="families" role="group" aria-label="Block families">
         <button type="button" aria-pressed={activeFamily === null} onclick={() => (activeFamily = null)}
           >All <small>{allBlocks.length}</small></button
@@ -239,9 +331,27 @@
       <button
         type="button"
         class="changed-filter"
+        aria-label="Changed"
         aria-pressed={changedOnly}
-        onclick={() => (changedOnly = !changedOnly)}>Changed</button
+        onclick={() => (changedOnly = !changedOnly)}>Changed <small>{changedCount}</small></button
       >
+      <div class="history">
+        <button
+          type="button"
+          class="quiet"
+          aria-label="Undo"
+          title="Undo (Ctrl+Z)"
+          disabled={disabled || !past.length}
+          onclick={undo}>↶</button
+        ><button
+          type="button"
+          class="quiet"
+          aria-label="Redo"
+          title="Redo (Ctrl+Shift+Z)"
+          disabled={disabled || !future.length}
+          onclick={redo}>↷</button
+        >
+      </div>
     </div>
     {#if stateError || mismatch || error || manifest?.unsupported.length || (unused.length && !mismatch)}
       <div class="issues">
@@ -263,128 +373,109 @@
             <pre>{unused.join("\n")}</pre>
             <button
               type="button"
-              onclick={() => {
-                state = {
-                  ...state,
-                  overrides: Object.fromEntries(
-                    Object.entries(state.overrides).filter(([name]) => validNames.has(name)),
-                  ),
-                };
-              }}>Remove unmatched overrides</button
+              onclick={() =>
+                update(Object.fromEntries(Object.entries(state.overrides).filter(([name]) => validNames.has(name))))}
+              >Remove unmatched overrides</button
             >
           </details>{/if}
       </div>
     {/if}
-    <div class="workspace" class:inspecting={Boolean(inspected)}>
+    <div class="workspace">
       <div class="block-browser" aria-busy={loading}>
         {#if loading}<p class="empty" role="status">Loading…</p>
         {:else if manifest && !allBlocks.length}<p class="empty">No recognized targets.</p>
-        {:else if manifest && !visibleBlocks.length}<p class="empty">No matching blocks.</p>
+        {:else if manifest && !visibleTargets.length}<p class="empty">No matching blocks.</p>
         {:else}
-          {#each visibleFamilies as family (family.name)}
-            <section class="family-section" aria-label={family.label}>
-              {#if activeFamily === null && visibleFamilies.length > 1}<h3>{family.label}</h3>{/if}
-              <div class="cards">
-                {#each family.blocks as block (block.name)}
-                  <div
-                    class="block card"
-                    class:changed={blockChanged(block, state.overrides)}
-                    class:selected={selected.has(block.name)}
-                    class:active={inspecting === block.name}
-                  >
-                    <input
-                      class="selection"
-                      type="checkbox"
-                      aria-label={`Select ${block.name}`}
-                      checked={selected.has(block.name)}
-                      {disabled}
-                      onchange={(event) => select(block.name, event.currentTarget.checked)}
-                    />
-                    <button
-                      type="button"
-                      class="block-name"
-                      title={block.name}
-                      aria-label={`Modules ${block.name}`}
-                      aria-expanded={inspecting === block.name}
-                      disabled={!block.controls.length}
-                      onclick={() => inspect(block)}
-                      ><span class="chevron">{inspecting === block.name ? "▾" : "▸"}</span>{block.label}</button
-                    >
-                    <div class="block-value">
-                      <StrengthControl
-                        label={`Multiplier ${block.name}`}
-                        value={targetMultiplier(block.name, state.overrides)}
-                        {disabled}
-                        onchange={(value) => change(block.name, value)}
-                      />
-                    </div>
-                    <input
-                      class="card-slider"
-                      type="range"
-                      aria-label={`Slider Multiplier ${block.name}`}
-                      min={Math.min(-2, targetMultiplier(block.name, state.overrides))}
-                      max={Math.max(2, targetMultiplier(block.name, state.overrides))}
-                      step="0.01"
-                      value={targetMultiplier(block.name, state.overrides)}
-                      {disabled}
-                      oninput={(event) => change(block.name, event.currentTarget.valueAsNumber)}
-                    />
-                    <button
-                      type="button"
-                      class="inherit"
-                      aria-label={`Inherit ${block.name}`}
-                      title="Inherit parent multiplier"
-                      disabled={disabled || !Object.hasOwn(state.overrides, block.name)}
-                      onclick={() => change(block.name, null)}>↺</button
-                    >
-                  </div>
-                {/each}
-              </div>
-            </section>
+          <p class="hint">
+            Drag across bars to paint · Click a bar for its exact value and modules · Shift/Ctrl-click to select ·
+            Scroll over the active or selected bars to adjust · Alt for fine steps
+          </p>
+          {#each charts as { family, targets } (family.name)}
+            <FamilyChart
+              {family}
+              {targets}
+              lens={lenses[family.name] ?? ""}
+              overrides={state.overrides}
+              {matching}
+              {selected}
+              active={inspecting}
+              {disabled}
+              onchange={(changes, group) => update({ ...state.overrides, ...changes }, group)}
+              onlens={(lens) => setLens(family.name, lens)}
+              onreset={(names) => update(clearOverrides(state.overrides, names))}
+              oninherit={(name) => change(name, null)}
+              oninspect={inspect}
+              onselect={select}
+            />
           {/each}
         {/if}
       </div>
-      {#if inspected}
-        <aside class="module-panel" aria-label={`Modules ${inspected.name}`}>
-          <div class="module-header">
-            <strong title={inspected.name}>{inspected.label}</strong><span>{inspected.targets.length}</span><button
+      {#if inspected && inspectedFamily}
+        {@const family = inspectedFamily}
+        <aside class="details" aria-label="Block details">
+          <div class="details-head">
+            <strong title={inspected.name}>{families.length > 1 ? `${family.label} · ` : ""}{inspected.label}</strong>
+            <StrengthControl
+              label={`Multiplier ${inspected.name}`}
+              value={targetMultiplier(inspected.name, state.overrides)}
+              {disabled}
+              onchange={(value) => change(inspected.name, value)}
+            />
+            <button
               type="button"
-              class="quiet"
-              aria-label="Close module details"
+              class="inherit"
+              aria-label={`Inherit ${inspected.name}`}
+              title="Inherit parent multiplier"
+              disabled={disabled || !Object.hasOwn(state.overrides, inspected.name)}
+              onclick={() => change(inspected.name, null)}>↺</button
+            >
+            {#if inspected.controls.length}
+              <input
+                class="module-search"
+                aria-label="Search block modules"
+                placeholder={`Find among ${inspected.controls.length} modules…`}
+                bind:value={moduleQuery}
+              />
+            {/if}
+            <button
+              type="button"
+              class="quiet close"
+              aria-label="Close block details"
               onclick={() => (inspecting = null)}>×</button
             >
           </div>
-          <input
-            class="module-search"
-            aria-label="Search block modules"
-            placeholder="Find module…"
-            bind:value={moduleQuery}
-          />
-          <div class="module-list">
-            {#each modules as control (control.name)}
-              <div
-                class="module-row"
-                class:group={control.group}
-                class:explicit={Object.hasOwn(state.overrides, control.name)}
-              >
-                <span class="module-name" title={control.name}>{control.label}</span>
-                <StrengthControl
-                  label={`Multiplier ${control.name}`}
-                  value={targetMultiplier(control.name, state.overrides)}
-                  {disabled}
-                  onchange={(value) => change(control.name, value)}
-                />
-                <button
-                  type="button"
-                  class="inherit"
-                  aria-label={`Inherit ${control.name}`}
-                  title="Inherit parent multiplier"
-                  disabled={disabled || !Object.hasOwn(state.overrides, control.name)}
-                  onclick={() => change(control.name, null)}>↺</button
+          {#if inspected.controls.length}
+            <div class="module-grid">
+              {#each modules as control (control.name)}
+                <div
+                  class="module-row"
+                  class:group={control.group}
+                  class:explicit={Object.hasOwn(state.overrides, control.name)}
                 >
-              </div>
-            {:else}<p class="empty">No matching modules.</p>{/each}
-          </div>
+                  <button
+                    type="button"
+                    class="module-name"
+                    title={`${control.name}\nShow ${control.label} across ${family.label}`}
+                    onclick={() => setLens(family.name, control.label)}>{control.label}</button
+                  >
+                  <StrengthControl
+                    label={`Multiplier ${control.name}`}
+                    value={targetMultiplier(control.name, state.overrides)}
+                    {disabled}
+                    onchange={(value) => change(control.name, value)}
+                  />
+                  <button
+                    type="button"
+                    class="inherit"
+                    aria-label={`Inherit ${control.name}`}
+                    title="Inherit parent multiplier"
+                    disabled={disabled || !Object.hasOwn(state.overrides, control.name)}
+                    onclick={() => change(control.name, null)}>↺</button
+                  >
+                </div>
+              {:else}<p class="empty">No matching modules.</p>{/each}
+            </div>
+          {/if}
         </aside>
       {/if}
     </div>
@@ -394,31 +485,31 @@
           type="checkbox"
           aria-label="Select visible blocks"
           checked={allSelected}
-          disabled={disabled || !visibleBlocks.length}
+          disabled={disabled || !visibleTargets.length}
           onchange={selectVisible}
-        />{selected.size ? `${selected.size} selected` : `${visibleBlocks.length} blocks`}</label
+        />{selected.size ? `${selected.size} selected` : "Select all visible"}</label
       >
       {#if selected.size}<button type="button" class="quiet" onclick={() => (selected = new SvelteSet())}>Clear</button
         >{/if}
-      {#if selected.size}<div class="bulk-actions">
-          <StrengthControl
-            label="Selected block multiplier"
-            value={bulkValue}
-            disabled={disabled || !selected.size}
-            onchange={(value) => (bulkValue = value)}
-          /><button
-            type="button"
-            title="Set block multipliers; module overrides stay unchanged"
-            disabled={disabled || !selected.size}
-            onclick={applyBulk}>Set selected</button
-          ><button
-            type="button"
-            class="quiet"
-            title="Remove block and module overrides in the selection"
-            disabled={disabled || !selected.size}
-            onclick={resetSelected}>Reset selected</button
-          >
-        </div>{/if}
+      <div class="bulk-actions">
+        <StrengthControl
+          label="Selected multiplier"
+          value={bulkValue}
+          disabled={disabled || !selected.size}
+          onchange={(value) => (bulkValue = value)}
+        /><button
+          type="button"
+          title="Set the selected bars; nested module overrides stay unchanged"
+          disabled={disabled || !selected.size}
+          onclick={applyBulk}>Set selected</button
+        ><button
+          type="button"
+          class="quiet"
+          title="Remove overrides for the selected bars and their modules"
+          disabled={disabled || !selected.size}
+          onclick={resetSelected}>Reset selected</button
+        >
+      </div>
       {#if !disabled}<button
           type="button"
           class="quiet reset-all"
@@ -432,8 +523,12 @@
 
 <style>
   .lora-modal {
-    width: min(1020px, calc(100vw - 28px));
-    max-height: calc(100dvh - 28px);
+    --bar-neutral: #4b524c;
+    --bar-raise: #d3a676;
+    --bar-lower: #7ea6cc;
+    width: min(1240px, calc(100vw - 48px));
+    max-height: none;
+    margin-top: 24px;
     padding: 0;
     border: 1px solid var(--border-strong);
     border-radius: 8px;
@@ -447,7 +542,7 @@
   form {
     display: flex;
     flex-direction: column;
-    max-height: calc(100dvh - 30px);
+    max-height: calc(100dvh - 48px);
   }
   header {
     display: flex;
@@ -456,8 +551,13 @@
     padding: 12px 14px 10px;
     flex-shrink: 0;
   }
+  header > :global(.lora-picker) {
+    flex: 1;
+    min-width: 0;
+  }
   .actions {
     display: flex;
+    align-items: center;
     gap: 5px;
     margin-left: auto;
     flex-shrink: 0;
@@ -465,23 +565,15 @@
   .actions button {
     padding: 5px 9px;
   }
+  .dirty {
+    margin-right: 4px;
+    font-size: 11px;
+    color: var(--accent);
+    white-space: nowrap;
+  }
   button.apply {
     background: var(--accent-bg);
     border-color: var(--accent-line);
-  }
-  .toolbar {
-    display: flex;
-    gap: 12px;
-    align-items: center;
-    padding: 0 14px 8px;
-    flex-shrink: 0;
-  }
-  .search {
-    flex: 1;
-    width: 80px;
-    padding: 5px 8px;
-    height: 29px;
-    font-size: 12px;
   }
   .global {
     display: flex;
@@ -489,25 +581,34 @@
     gap: 6px;
     font-size: 11px;
     color: var(--muted);
+    flex-shrink: 0;
+  }
+  .toolbar {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    padding: 0 14px 8px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .search {
+    flex: 1;
+    width: 80px;
+    min-width: 140px;
+    padding: 5px 8px;
+    height: 29px;
+    font-size: 12px;
   }
   button[aria-pressed="true"] {
     color: var(--accent);
     background: var(--accent-bg);
   }
-  .navigation {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 0 14px 8px;
-    border-bottom: 1px solid var(--border);
-    flex-shrink: 0;
-  }
   .families {
     display: flex;
     gap: 3px;
-    flex: 1;
     overflow-x: auto;
     min-width: 0;
+    flex-shrink: 1;
   }
   .families button {
     background: transparent;
@@ -528,6 +629,16 @@
   .changed-filter {
     font-size: 11px;
     padding: 3px 8px;
+    flex-shrink: 0;
+  }
+  .history {
+    display: flex;
+    flex-shrink: 0;
+  }
+  .history button {
+    width: 26px;
+    padding: 2px 0;
+    font-size: 14px;
   }
   .issues {
     padding: 5px 14px;
@@ -555,79 +666,26 @@
   }
   .workspace {
     display: flex;
-    min-height: 100px;
+    flex: 0 1 auto;
+    flex-direction: column;
+    min-height: 0;
     min-width: 0;
-    overflow: hidden;
   }
   .block-browser {
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+    flex: 0 1 auto;
+    min-height: 0;
     min-width: 0;
-    flex: 1;
     overflow: auto;
-    max-height: min(540px, calc(100dvh - 185px));
-    padding: 8px 12px;
+    padding: 10px 16px 14px;
     scrollbar-width: thin;
   }
-  .family-section + .family-section {
-    margin-top: 12px;
-  }
-  h3 {
-    font-size: 11px;
-    font-weight: 500;
-    color: var(--muted);
-    margin: 0 2px 6px;
-  }
-  .cards {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
-    gap: 6px;
-  }
-  .block {
-    min-width: 0;
-    position: relative;
-  }
-  .block:hover {
-    background: var(--surface-1);
-  }
-  .block.selected {
-    background: var(--accent-bg);
-  }
-  .block.active {
-    outline: 1px solid var(--accent-line);
-    outline-offset: -1px;
-  }
-  .block-name {
-    min-width: 0;
-    border: 0;
-    padding: 0;
-    text-align: left;
-    background: transparent;
-    font-size: 12px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .block-name:disabled {
-    opacity: 1;
-    color: var(--text);
-    cursor: default;
-  }
-  .changed .block-name {
-    color: var(--accent);
-  }
-  .chevron {
-    display: inline-block;
-    width: 16px;
-    color: var(--muted);
-  }
-  .block-name:disabled .chevron {
-    visibility: hidden;
-  }
-  input.selection,
-  .select-visible input {
-    width: 12px;
-    height: 12px;
-    margin: 0;
-    accent-color: var(--accent);
-    cursor: pointer;
+  .hint {
+    margin: 0 0 -10px;
+    font-size: 10.5px;
+    color: var(--placeholder);
   }
   button.inherit {
     width: 22px;
@@ -641,80 +699,29 @@
   button.inherit:disabled {
     visibility: hidden;
   }
-  .block-value {
-    min-width: 0;
-  }
-  .card {
-    display: grid;
-    grid-template-columns: 13px minmax(0, 1fr) 17px;
-    gap: 5px 3px;
-    padding: 7px;
-    border: 1px solid var(--border);
-    border-radius: 5px;
-    background: var(--surface-1);
-  }
-  .card.changed {
-    border-color: var(--accent-line);
-  }
-  .card .selection {
-    grid-column: 1;
-    grid-row: 1;
-    align-self: center;
-  }
-  .card .block-name {
-    grid-column: 2;
-    grid-row: 1;
-    font-size: 11px;
-    line-height: 19px;
-  }
-  .card .chevron {
-    float: right;
-    width: auto;
-  }
-  .card .block-value {
-    grid-column: 1 / -1;
-    grid-row: 2;
-    display: flex;
-    justify-content: center;
-  }
-  .card .inherit {
-    grid-column: 3;
-    grid-row: 1;
-    width: 17px;
-  }
-  input.card-slider {
-    grid-column: 1 / -1;
-    width: 100%;
-    height: 10px;
-    padding: 0;
-    margin: 0;
-    accent-color: var(--accent);
-    cursor: pointer;
-  }
-  .module-panel {
-    width: 310px;
-    flex-shrink: 0;
-    min-width: 0;
-    border-left: 1px solid var(--border);
+  .details {
     display: flex;
     flex-direction: column;
-    max-height: min(540px, calc(100dvh - 185px));
+    flex-shrink: 0;
+    max-height: 40dvh;
+    min-height: 0;
+    border-top: 1px solid var(--border);
     background: var(--surface-1);
   }
-  .module-header {
+  .details-head {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 8px 10px 5px;
+    padding: 8px 12px;
   }
-  .module-header strong {
+  .details-head strong {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     font-size: 12px;
   }
-  .module-header > span {
-    color: var(--muted);
-    font-size: 10px;
-  }
-  .module-header button {
+  .details-head .close {
     margin-left: auto;
     padding: 0;
     width: 22px;
@@ -722,15 +729,18 @@
     font-size: 17px;
   }
   .module-search {
-    width: calc(100% - 20px);
-    margin: 0 10px 6px;
+    width: 240px;
+    margin-left: 12px;
     padding: 4px 6px;
     height: 26px;
     font-size: 11px;
   }
-  .module-list {
+  .module-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    column-gap: 18px;
     overflow: auto;
-    padding: 0 6px 6px;
+    padding: 0 12px 8px;
     scrollbar-width: thin;
   }
   .module-row {
@@ -743,10 +753,18 @@
     border-bottom: 1px solid var(--surface-2);
   }
   .module-name {
+    padding: 2px 4px;
+    border: 0;
+    background: transparent;
+    text-align: left;
+    white-space: normal;
     font:
       11px/1.3 ui-monospace,
       monospace;
     overflow-wrap: anywhere;
+  }
+  .module-name:hover {
+    color: var(--accent);
   }
   .module-row.group .module-name {
     font-weight: 600;
@@ -756,7 +774,7 @@
     color: var(--accent);
   }
   .empty {
-    margin: 18px 4px;
+    margin: 18px 10px;
     font-size: 12px;
     color: var(--muted);
   }
@@ -778,6 +796,13 @@
     font-size: 11px;
     white-space: nowrap;
   }
+  .select-visible input {
+    width: 12px;
+    height: 12px;
+    margin: 0;
+    accent-color: var(--accent);
+    cursor: pointer;
+  }
   footer button {
     font-size: 11px;
     padding: 4px 7px;
@@ -786,29 +811,41 @@
     display: flex;
     align-items: center;
     gap: 5px;
-    margin-left: auto;
+    margin-left: 8px;
   }
   .reset-all {
     margin-left: auto;
   }
   @media (max-width: 720px) {
-    header {
-      gap: 8px;
-      flex-wrap: wrap;
+    .lora-modal {
+      width: calc(100vw - 16px);
+      margin-top: 8px;
     }
+    form {
+      max-height: calc(100dvh - 16px);
+    }
+    header,
     .toolbar {
       gap: 7px;
       flex-wrap: wrap;
     }
+    header > :global(.lora-picker),
     .search {
       flex-basis: 100%;
     }
-    .workspace.inspecting .block-browser {
-      display: none;
+    .actions {
+      margin-left: auto;
     }
-    .module-panel {
+    .details {
+      max-height: 50dvh;
+    }
+    .details-head {
+      flex-wrap: wrap;
+    }
+    .module-search {
+      order: 3;
       width: 100%;
-      border-left: 0;
+      margin: 0;
     }
     footer {
       flex-wrap: wrap;
@@ -820,27 +857,15 @@
       width: 100%;
       margin: 0;
     }
-    .reset-all {
-      margin-left: auto;
-    }
-    .block-browser,
-    .module-panel {
-      max-height: calc(100dvh - 265px);
-    }
   }
   @media (max-width: 440px) {
     header,
-    .toolbar,
-    .navigation {
+    .toolbar {
       padding-left: 10px;
       padding-right: 10px;
     }
-    .cards {
-      grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
-      gap: 5px;
-    }
     .block-browser {
-      padding: 7px;
+      padding: 8px 10px;
     }
     .global {
       gap: 4px;
