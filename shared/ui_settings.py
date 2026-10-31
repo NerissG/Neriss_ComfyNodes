@@ -41,6 +41,7 @@ DEFAULT_BINDINGS: dict[str, list[KeyBinding]] = {
     "history.undo": [{"key": "z", "modifiers": ["Mod"]}],
     "history.redo": [{"key": "z", "modifiers": ["Mod", "Shift"]}, {"key": "y", "modifiers": ["Mod"]}],
     "selection.delete": [{"key": "delete", "modifiers": []}, {"key": "backspace", "modifiers": []}],
+    "selection.duplicate": [{"key": "d", "modifiers": ["Mod"]}],
     "view.focus": [{"key": "f", "modifiers": []}],
     "view.fitCanvas": [{"key": "0", "modifiers": []}],
     "view.zoomSelection": [{"key": "1", "modifiers": []}],

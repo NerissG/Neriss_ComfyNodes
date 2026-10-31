@@ -19,5 +19,6 @@ export function trapTab(event: KeyboardEvent, scope: HTMLElement, root: HTMLElem
 }
 
 export function restoreFocus(element: Element | null) {
-  if (element instanceof HTMLElement && element.isConnected) element.focus({ preventScroll: true });
+  if ((element instanceof HTMLElement || element instanceof SVGElement) && element.isConnected)
+    element.focus({ preventScroll: true });
 }

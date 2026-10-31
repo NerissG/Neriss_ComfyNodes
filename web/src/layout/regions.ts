@@ -65,6 +65,44 @@ export function regionTitle(region: EditorRegion, index: number): string {
   );
 }
 
+// Each copy keeps its subtree, follows its source among siblings and shifts as one block so nesting stays intact.
+export function duplicateRegions(state: EditorState, ids: string[]): EditorState {
+  const outline = regionOutline(state.elements);
+  const renamed = new Map<string | null | undefined, string>();
+  const copies = new Map<string, EditorRegion[]>();
+  for (const { region } of outline) {
+    if (!ids.includes(region.id) || renamed.has(region.id)) continue;
+    const subtree = regionSubtreeIds(state.elements, region.id);
+    const members = outline.map((entry) => entry.region).filter((item) => subtree.has(item.id));
+    const boxes = members.flatMap((item) => (item.bbox ? [item.bbox] : []));
+    const dy = Math.min(16, 1000 - Math.max(...boxes.map((box) => box[2])));
+    const dx = Math.min(16, 1000 - Math.max(...boxes.map((box) => box[3])));
+    copies.set(
+      region.id,
+      members.map((item) => {
+        const id = `${item.type}-${crypto.randomUUID()}`;
+        renamed.set(item.id, id);
+        return {
+          ...item,
+          id,
+          parent_id: renamed.get(item.parent_id) ?? item.parent_id,
+          bbox: item.bbox && [item.bbox[0] + dy, item.bbox[1] + dx, item.bbox[2] + dy, item.bbox[3] + dx],
+          color_palette: [...item.color_palette],
+        };
+      }),
+    );
+  }
+  const first = copies.values().next().value?.[0];
+  if (!first) return state;
+  return {
+    ...state,
+    elements: regionOutline(state.elements.flatMap((region) => [region, ...(copies.get(region.id) ?? [])])).map(
+      (entry) => entry.region,
+    ),
+    selected_region_id: renamed.get(state.selected_region_id) ?? first.id,
+  };
+}
+
 export function removeRegions(state: EditorState, ids: string[]): EditorState {
   const removed = new Set(ids.flatMap((id) => [...regionSubtreeIds(state.elements, id)]));
   const elements = state.elements.filter((region) => !removed.has(region.id));

@@ -13,7 +13,8 @@ const { buildMossPrompt: buildMossPromptResult, importMossText } =
   await server.ssrLoadModule("/src/layout/moss/prompt.ts");
 const buildMossPrompt = (state) => buildMossPromptResult(state)._unsafeUnwrap();
 const { buildPrompt, importIdeogramText } = await server.ssrLoadModule("/src/layout/ideogram/prompt.ts");
-const { moveRegion, regionOutline, removeRegions } = await server.ssrLoadModule("/src/layout/regions.ts");
+const { duplicateRegions, moveRegion, regionOutline, removeRegions } =
+  await server.ssrLoadModule("/src/layout/regions.ts");
 const { toCentralized, fromCentralized, moveBbox, resizeBbox, bboxFromPoints } =
   await server.ssrLoadModule("/src/layout/geometry.ts");
 const { parseColor } = await server.ssrLoadModule("/src/layout/colors.ts");
@@ -303,6 +304,31 @@ test("moving subtrees preserves descendants, sibling order, selection and absolu
     ["parent", "other"],
   );
   assert.equal(removed.selected_region_id, null);
+});
+
+test("duplicating copies subtrees after their source with shifted boxes and fresh IDs", () => {
+  const state = nestedState();
+  const copied = duplicateRegions(state, ["parent", "child"]);
+  const outline = regionOutline(copied.elements);
+  assert.deepEqual(
+    outline.map(({ depth }) => depth),
+    [0, 1, 2, 0, 1, 2, 0],
+  );
+  const [, , , parent, child, detail, other] = outline.map(({ region }) => region);
+  assert.equal(other.id, "other");
+  assert.equal(new Set(copied.elements.map((region) => region.id)).size, 7);
+  assert.equal(child.parent_id, parent.id);
+  assert.equal(detail.parent_id, child.id);
+  assert.equal(detail.type, "text");
+  assert.match(detail.id, /^text-/);
+  assert.deepEqual(parent.bbox, [116, 116, 216, 216]);
+  assert.deepEqual(detail.bbox, [316, 416, 516, 616]);
+  assert.equal(copied.selected_region_id, detail.id);
+  assert.equal(parseEditorState(stringifyEditorState(copied)).isOk(), true);
+  const edge = duplicateRegions(state, ["other"]);
+  assert.deepEqual(edge.elements.at(-1).bbox, [0, 0, 1000, 1000]);
+  assert.equal(edge.selected_region_id, edge.elements.at(-1).id);
+  assert.equal(duplicateRegions(state, []), state);
 });
 
 test("saved hierarchy rejects missing parents, duplicate IDs and cycles", () => {

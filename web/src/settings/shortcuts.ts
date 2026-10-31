@@ -47,6 +47,7 @@ export const commandIdSchema = z.enum([
   "history.undo",
   "history.redo",
   "selection.delete",
+  "selection.duplicate",
   "view.focus",
   "view.fitCanvas",
   "view.zoomSelection",
@@ -112,6 +113,13 @@ export const shortcutCommands: ShortcutCommand[] = [
     category: "History & selection",
     scope: "editor",
     defaults: [binding("delete"), binding("backspace")],
+  },
+  {
+    id: "selection.duplicate",
+    label: "Duplicate regions",
+    category: "History & selection",
+    scope: "editor",
+    defaults: [binding("d", "Mod")],
   },
   {
     id: "view.focus",

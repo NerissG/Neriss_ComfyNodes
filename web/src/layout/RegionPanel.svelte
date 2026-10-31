@@ -13,6 +13,7 @@
   export let checkedIds: string[] = [];
   export let onchange: (state: EditorState) => void;
   export let onremove: (ids: string[]) => void;
+  export let onduplicate: (ids: string[]) => void;
   export let onredraw: (id: string) => void;
   export let onzoom: () => void;
   let draggingId: string | null = null;
@@ -161,7 +162,9 @@
           (checkedIds = event.currentTarget.checked ? state.elements.map((region) => region.id) : [])}
       />{/if}
     <h2>Regions <span class="count">{state.elements.length}</span></h2>
-    {#if checkedIds.length}<button type="button" class="quiet danger" onclick={() => onremove(checkedIds)}
+    {#if checkedIds.length}<button type="button" class="quiet" onclick={() => onduplicate(checkedIds)}
+        >Duplicate selected ({checkedIds.length})</button
+      ><button type="button" class="quiet danger" onclick={() => onremove(checkedIds)}
         >Delete selected ({checkedIds.length})</button
       >{/if}
     <button type="button" class="quiet" onclick={() => addRegion(null)}>+ Region</button>
@@ -283,6 +286,12 @@
           </h2>
           <button type="button" class="quiet" onclick={() => onredraw(region.id)}
             >{region.bbox ? "Redraw" : "Draw box"}</button
+          >
+          <button
+            type="button"
+            class="quiet"
+            title="Duplicate region and its children"
+            onclick={() => onduplicate([region.id])}>Duplicate</button
           >
           <button
             type="button"

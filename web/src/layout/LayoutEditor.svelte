@@ -17,14 +17,14 @@
   import ShortcutEditor from "@/settings/ShortcutEditor.svelte";
   import Alert from "@/ui/Alert.svelte";
   import { activeDialog } from "@/ui/Dialog.svelte";
-  import { trapTab } from "@/ui/focus";
+  import { restoreFocus, trapTab } from "@/ui/focus";
   import Icon from "@/ui/Icon.svelte";
   import ToggleGroup from "@/ui/ToggleGroup.svelte";
   import { layoutEditorNode } from "@/views";
   import { uploadReferenceImage, type ReferenceImage } from "./api";
   import { readClipboardImage, readClipboardText, writeClipboardText } from "./clipboard";
   import { editorModel, editorTitles, importPromptText, previewPrompt } from "./models";
-  import { removeRegions } from "./regions";
+  import { duplicateRegions, removeRegions } from "./regions";
   import {
     createInitialState,
     encodeEditorState,
@@ -79,6 +79,7 @@
   let focusCounter = 0;
   let canvas: LayoutCanvas | undefined;
   let previousFocus: Element | null = null;
+  let pasteTarget: HTMLElement;
   let resizeStart: { x: number; width: number } | null = null;
   $: jsonPreview = previewPrompt(model, state);
   $: checkedIds = checkedIds.filter((id) => state.elements.some((region) => region.id === id));
@@ -153,6 +154,13 @@
     checkedIds = [];
     hoveredId = null;
     setNotice(`Deleted ${count} ${count === 1 ? "region" : "regions"}. Use Undo to restore.`);
+  }
+  function duplicate(ids: string[]) {
+    canvas?.cancelInteraction();
+    const next = duplicateRegions(state, ids);
+    if (next === state) return;
+    persist(next);
+    checkedIds = [];
   }
   function retainHistory() {
     canvas?.cancelInteraction();
@@ -360,6 +368,9 @@
       case "selection.delete":
         remove(checkedIds.length ? checkedIds : state.selected_region_id ? [state.selected_region_id] : []);
         break;
+      case "selection.duplicate":
+        duplicate(checkedIds.length ? checkedIds : state.selected_region_id ? [state.selected_region_id] : []);
+        break;
       case "view.focus":
         focused = !focused;
         break;
@@ -382,7 +393,17 @@
     // inside it. Both native modals must keep ownership of focus and Escape.
     const inside = (event: Event) => event.target instanceof Node && (activeDialog() ?? element).contains(event.target);
     const stopPropagation = (event: Event) => event.stopPropagation();
+    const pasteKey = (event: KeyboardEvent) =>
+      ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "v") ||
+      (event.shiftKey && event.key === "Insert");
+    let pasteReturn: Element | null = null;
     const keydown = (event: KeyboardEvent, target = event.target) => {
+      // Host extensions paste into selected graph nodes from window capture listeners that run
+      // before ours, but they leave editable targets alone, so route image pastes through one.
+      if (pasteKey(event) && !event.defaultPrevented && !textTarget(target)) {
+        pasteReturn = document.activeElement;
+        pasteTarget.focus({ preventScroll: true });
+      }
       keyboard(event, target);
       // Trap tab navigation inside the full-screen editor while retaining native field editing.
       if (event.key === "Tab" && !event.defaultPrevented)
@@ -402,11 +423,7 @@
       }
       element.focus({ preventScroll: true });
       if (event.type === "keydown") keydown(event, element);
-      const nativePaste =
-        event.type === "keydown" &&
-        (((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "v") ||
-          (event.shiftKey && event.key === "Insert"));
-      if (!nativePaste) event.preventDefault();
+      if (event.type !== "keydown" || !pasteKey(event)) event.preventDefault();
       event.stopImmediatePropagation();
     };
     const captureFocus = (event: FocusEvent) => {
@@ -421,7 +438,9 @@
       editGroup = null;
     };
     const paste = (event: ClipboardEvent) => {
-      if (!node || (inside(event) && textTarget(event.target))) return;
+      const routed = event.target === pasteTarget;
+      if (routed) restoreFocus(pasteReturn);
+      if (!node || (!routed && inside(event) && textTarget(event.target))) return;
       event.preventDefault();
       event.stopImmediatePropagation();
       if (invalidState !== null || activeDialog() || showJson) return;
@@ -477,6 +496,7 @@
     tabindex="-1"
     use:isolateKeyboard
   >
+    <div bind:this={pasteTarget} class="sr-only" contenteditable="true" tabindex="-1" aria-hidden="true"></div>
     {#if invalidState !== null}
       <section class="state-recovery" aria-label="Editor state recovery">
         <h2>Saved layout could not be opened</h2>
@@ -596,6 +616,7 @@
                 bind:checkedIds
                 onchange={persist}
                 onremove={remove}
+                onduplicate={duplicate}
                 onredraw={(id) => {
                   canvas?.cancelInteraction();
                   persist({ ...state, selected_region_id: id });

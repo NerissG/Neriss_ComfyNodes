@@ -294,7 +294,7 @@ test("shortcut categories stay compact and row options work with keyboard and sm
   }
   for (const [label, count] of [
     ["Tools", 5],
-    ["Editing", 3],
+    ["Editing", 4],
     ["View", 7],
     ["Movement", 8],
   ] satisfies [string, number][]) {
@@ -1058,6 +1058,18 @@ test("native text clipboard editing stays inside the editor, expanded fields and
 
 test("native image paste automatically matches the canvas and is one undo step", async ({ page }) => {
   await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  // Host extensions claim pastes for a selected graph node before the editor's listeners, except in editable targets.
+  await page.addInitScript(() => {
+    window.addEventListener(
+      "paste",
+      (event) => {
+        if (event.target instanceof HTMLElement && event.target.isContentEditable) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      },
+      true,
+    );
+  });
   const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="913" height="607"/>';
   await page.route("**/neriss_comfynodes/editor/reference_image**", (route) =>
     route.fulfill(
@@ -1077,9 +1089,11 @@ test("native image paste automatically matches the canvas and is one undo step",
     return true;
   });
   expect(copied).toBe(true);
-  await page.getByRole("application", { name: "Layout canvas" }).focus();
+  const canvas = page.getByRole("application", { name: "Layout canvas" });
+  await canvas.focus();
   await page.keyboard.press("Control+v");
   await expect.poll(async () => (await readState(page)).reference_image_path).toBe("pasted.svg");
+  await expect(canvas).toBeFocused();
   const pasted = await readState(page);
   expect([pasted.width, pasted.height]).toEqual([913, 607]);
   await page.getByRole("button", { name: "Undo", exact: true }).click();
@@ -1213,6 +1227,29 @@ test("deletion clears selection without overlays, moving the canvas, or reopenin
   await page.getByRole("button", { name: "Undo", exact: true }).click();
   expect((await readState(page)).selected_region_id).toBe("reader");
   await expect(page.locator(".region.selected")).toHaveCount(1);
+});
+
+test("duplicating selects the copy, works from the shortcut and bulk selection, and is undoable", async ({ page }) => {
+  await openEditor(page);
+  const initial = (await readState(page)).elements.length;
+  await page.locator(".region-details").getByRole("button", { name: "Duplicate", exact: true }).click();
+  const state = await readState(page);
+  const source = state.elements.find((region) => region.id === "reader");
+  const copy = state.elements.find((region) => region.id === state.selected_region_id);
+  expect(state.elements).toHaveLength(initial + 1);
+  expect(copy?.id).not.toBe("reader");
+  expect(copy?.desc).toBe(source?.desc);
+  expect(copy?.bbox).not.toEqual(source?.bbox);
+  await page.getByRole("application", { name: "Layout canvas" }).focus();
+  await page.keyboard.press("ControlOrMeta+D");
+  expect((await readState(page)).elements).toHaveLength(initial + 2);
+  await page.getByRole("checkbox", { name: "Select all regions" }).check();
+  await page.getByRole("button", { name: `Duplicate selected (${initial + 2})` }).click();
+  expect((await readState(page)).elements).toHaveLength((initial + 2) * 2);
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
+  expect((await readState(page)).elements).toHaveLength(initial);
 });
 
 for (const model of ["moss", "ideogram"] satisfies EditorModel[]) {
