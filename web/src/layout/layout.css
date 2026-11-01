@@ -182,17 +182,35 @@
 .neriss-layout-editor .regions-section {
   padding: 10px 12px;
 }
+/* Mirrors .region-row so the select-all checkbox, title, and action icons line up with the rows. */
 .neriss-layout-editor .regions-section .section-heading {
   justify-content: flex-start;
+  height: 26px;
+  gap: 1px;
   margin-bottom: 4px;
+  padding: 0 2px;
 }
 .neriss-layout-editor .regions-section .section-heading h2 {
-  margin-right: auto;
+  padding-left: 4px;
+  white-space: nowrap;
 }
 .neriss-layout-editor .regions-section .section-heading input[type="checkbox"] {
+  flex-shrink: 0;
   width: 12px;
   height: 12px;
-  margin: 0 0 0 22px;
+  margin: 0 3px 0 20px;
+}
+.neriss-layout-editor .selection-count {
+  min-width: 0;
+  margin-left: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--accent);
+}
+.neriss-layout-editor .regions-section .section-heading > button:first-of-type {
+  margin-left: auto;
 }
 .neriss-layout-editor .region-item {
   position: relative;
@@ -288,7 +306,7 @@
   cursor: grab;
   color: var(--muted);
 }
-.neriss-layout-editor .region-row button.region-icon {
+.neriss-layout-editor button.region-icon {
   display: grid;
   place-items: center;
   width: 22px;
@@ -298,7 +316,7 @@
   border-radius: 3px;
   color: var(--muted);
 }
-.neriss-layout-editor .region-icon svg {
+.neriss-layout-editor .region-row .region-icon svg {
   width: 14px;
   height: 14px;
   fill: none;
@@ -307,7 +325,7 @@
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-.neriss-layout-editor .region-row button.region-delete:hover {
+.neriss-layout-editor button.region-delete:hover:not(:disabled) {
   color: var(--danger);
 }
 .neriss-layout-editor .region-details {

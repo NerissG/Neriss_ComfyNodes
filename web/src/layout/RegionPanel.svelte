@@ -169,12 +169,38 @@
           (checkedIds = event.currentTarget.checked ? state.elements.map((region) => region.id) : [])}
       />{/if}
     <h2>Regions <span class="count">{state.elements.length}</span></h2>
-    {#if checkedIds.length}<button type="button" class="quiet" onclick={() => onduplicate(checkedIds)}
-        >Duplicate selected ({checkedIds.length})</button
-      ><button type="button" class="quiet danger" onclick={() => onremove(checkedIds)}
-        >Delete selected ({checkedIds.length})</button
+    {#if checkedIds.length}<span class="selection-count">{checkedIds.length} selected</span>{/if}
+    {#if state.elements.length}<button
+        type="button"
+        class="quiet region-icon"
+        aria-label="Invert selection"
+        title="Invert selection"
+        onclick={() =>
+          (checkedIds = state.elements.filter((region) => !checkedIds.includes(region.id)).map((region) => region.id))}
+        ><Icon name="invert-selection" /></button
+      ><button
+        type="button"
+        class="quiet region-icon"
+        disabled={!checkedIds.length}
+        aria-label={`Duplicate selected (${checkedIds.length})`}
+        title="Duplicate selected regions"
+        onclick={() => onduplicate(checkedIds)}><Icon name="copy" /></button
       >{/if}
-    <button type="button" class="quiet" onclick={() => addRegion(null)}>+ Region</button>
+    <button
+      type="button"
+      class="quiet region-icon"
+      aria-label="Add region"
+      title="Add region"
+      onclick={() => addRegion(null)}><Icon name="plus" /></button
+    >
+    {#if state.elements.length}<button
+        type="button"
+        class="quiet region-icon region-delete"
+        disabled={!checkedIds.length}
+        aria-label={`Delete selected (${checkedIds.length})`}
+        title="Delete selected regions and their children"
+        onclick={() => onremove(checkedIds)}><Icon name="trash" /></button
+      >{/if}
   </div>
   <div class="region-list" bind:this={list}>
     <div

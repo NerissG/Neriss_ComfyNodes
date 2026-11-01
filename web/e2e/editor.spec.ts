@@ -749,6 +749,12 @@ for (const model of ["moss", "ideogram"] satisfies EditorModel[]) {
     await expect(caption).toHaveValue("A reader in a long blue coat, holding an open book");
     await page.getByRole("checkbox", { name: "Select region 1 for bulk actions" }).check();
     await page.getByRole("checkbox", { name: "Select region 3 for bulk actions" }).check();
+    const invert = page.getByRole("button", { name: "Invert selection" });
+    await invert.click();
+    await expect(page.getByRole("checkbox", { name: "Select region 1 for bulk actions" })).not.toBeChecked();
+    await expect(page.getByRole("checkbox", { name: "Select region 2 for bulk actions" })).toBeChecked();
+    await expect(page.getByRole("button", { name: "Delete selected (7)" })).toBeEnabled();
+    await invert.click();
     await page.getByRole("button", { name: "Delete selected (2)" }).click();
     await expect(page.locator(".region-item")).toHaveCount(7);
     await page.getByRole("checkbox", { name: "Select all regions" }).check();
