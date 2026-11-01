@@ -2,7 +2,7 @@
   import { tick } from "svelte";
   import { createRegion, type EditorModel, type EditorRegion, type EditorState } from "./state";
   import { fromCentralized, toCentralized, type Bbox } from "./geometry";
-  import { canParentRegion, moveRegion, regionColor, regionOutline, regionTitle } from "./regions";
+  import { canParentRegion, moveRegion, regionColor, regionOutline, regionSubtreeIds, regionTitle } from "./regions";
   import PaletteField from "./PaletteField.svelte";
   import TextField from "./TextField.svelte";
   import NumberField from "@/ui/NumberField.svelte";
@@ -18,17 +18,22 @@
   export let onredraw: (id: string) => void;
   export let onzoom: () => void;
   let draggingId: string | null = null;
+  let dragX = 0;
+  let dragDepth = 0;
   let dropTarget: {
-    id: string | null;
     parentId: string | null;
     slot: number;
+    rowId: string | null;
     placement: "before" | "after" | "inside";
+    depth: number;
   } | null = null;
+  const indent = 14;
   let panel: HTMLElement;
   let list: HTMLDivElement;
   let coordinateError = "";
   $: selected = state.elements.find((region) => region.id === state.selected_region_id);
   $: outline = regionOutline(state.elements);
+  $: movingIds = draggingId ? regionSubtreeIds(state.elements, draggingId) : new Set<string>();
   $: siblings = state.elements.filter((region) => (region.parent_id ?? null) === (selected?.parent_id ?? null));
   $: siblingIndex = siblings.findIndex((region) => region.id === selected?.id);
   $: selectedType =
@@ -108,46 +113,69 @@
     event.stopPropagation();
     if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
     dropTarget = {
-      id: null,
       parentId: null,
       slot: first ? 0 : state.elements.filter((region) => !region.parent_id).length,
+      rowId: null,
       placement: first ? "before" : "after",
+      depth: 0,
     };
   }
-  function dragOver(event: DragEvent, region: EditorRegion, depth: number) {
-    if (!draggingId || !(event.currentTarget instanceof HTMLElement)) return;
-    event.preventDefault();
-    event.stopPropagation();
-    if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
-    const row = event.currentTarget.querySelector<HTMLElement>(".region-row");
-    if (!row) return;
-    const rect = row.getBoundingClientRect();
-    let target = region;
-    // The full-width indentation gutter remains a drop surface for outdenting.
-    const desiredDepth = Math.max(0, Math.floor((event.clientX - list.getBoundingClientRect().left) / 14));
-    while (event.clientX < rect.left && depth > desiredDepth && target.parent_id) {
-      const parent = state.elements.find((item) => item.id === target.parent_id);
-      if (!parent) return;
-      target = parent;
-      depth -= 1;
-    }
-    const inside =
-      target.id === region.id &&
-      event.clientX > rect.left + 60 &&
-      event.clientY > rect.top + rect.height * 0.25 &&
-      event.clientY < rect.bottom - rect.height * 0.25;
-    const parentId = inside ? target.id : (target.parent_id ?? null);
-    if (!canParentRegion(state.elements, draggingId, parentId) || target.id === draggingId) {
+  // The whole section accepts the drag so overshooting sideways while outdenting still drops; rows are picked by height.
+  function dragOver(event: DragEvent) {
+    if (!draggingId) return;
+    const items = Array.from(list.querySelectorAll<HTMLElement>(".region-item"));
+    const bounds = list.getBoundingClientRect();
+    if (!items.length || event.clientY < bounds.top || event.clientY > bounds.bottom) {
       dropTarget = null;
       return;
     }
-    const items = state.elements.filter((item) => (item.parent_id ?? null) === parentId);
-    const after = event.clientY > rect.top + rect.height / 2;
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+    const hovered = items.findIndex((item) => event.clientY < item.getBoundingClientRect().bottom);
+    const index = hovered < 0 ? items.length - 1 : hovered;
+    const { region, depth } = outline[index];
+    const rect = items[index].getBoundingClientRect();
+    const moving = movingIds.has(region.id);
+    if (
+      !moving &&
+      event.clientX > rect.left + Math.min(depth, 6) * indent + 60 &&
+      event.clientY > rect.top + rect.height * 0.25 &&
+      event.clientY < rect.bottom - rect.height * 0.25
+    ) {
+      dropTarget = {
+        parentId: region.id,
+        slot: state.elements.filter((item) => item.parent_id === region.id).length,
+        rowId: region.id,
+        placement: "inside",
+        depth: depth + 1,
+      };
+      return;
+    }
+    // Drop into the gap between the nearest rows outside the moving subtree; horizontal movement picks a depth
+    // between the next row's depth and one level below the previous row.
+    const after = !moving && event.clientY > rect.top + rect.height / 2;
+    const gap = moving ? outline.findIndex((entry) => entry.region.id === draggingId) : index + (after ? 1 : 0);
+    const before = outline.slice(0, gap).filter((entry) => !movingIds.has(entry.region.id));
+    const prev = before.at(-1);
+    const next = outline.slice(gap).find((entry) => !movingIds.has(entry.region.id));
+    const target = Math.max(
+      next?.depth ?? 0,
+      Math.min(prev ? prev.depth + 1 : 0, dragDepth + Math.round((event.clientX - dragX) / indent)),
+    );
+    const anchor = before.reverse().find((entry) => entry.depth <= target);
+    const parentId = anchor && anchor.depth < target ? anchor.region.id : (anchor?.region.parent_id ?? null);
     dropTarget = {
-      id: region.id,
       parentId,
-      slot: inside ? items.length : items.findIndex((item) => item.id === target.id) + (after ? 1 : 0),
-      placement: inside ? "inside" : after ? "after" : "before",
+      slot:
+        anchor?.depth === target
+          ? state.elements
+              .filter((item) => (item.parent_id ?? null) === parentId)
+              .findIndex((item) => item.id === anchor.region.id) + 1
+          : 0,
+      rowId: moving ? draggingId : region.id,
+      placement: after ? "after" : "before",
+      depth: target,
     };
   }
   function drop(event: DragEvent) {
@@ -159,7 +187,17 @@
   }
 </script>
 
-<section class="regions-section" bind:this={panel}>
+<section
+  class="regions-section"
+  role="group"
+  aria-label="Regions"
+  bind:this={panel}
+  ondragover={dragOver}
+  ondragleave={(event) => {
+    if (!(event.relatedTarget instanceof Node && panel.contains(event.relatedTarget))) dropTarget = null;
+  }}
+  ondrop={drop}
+>
   <div class="section-heading">
     {#if state.elements.length}<input
         type="checkbox"
@@ -202,11 +240,11 @@
         onclick={() => onremove(checkedIds)}><Icon name="trash" /></button
       >{/if}
   </div>
-  <div class="region-list" bind:this={list}>
+  <div class="region-list" bind:this={list} style={`--drop-indent: ${Math.min(dropTarget?.depth ?? 0, 6) * indent}px`}>
     <div
       class="root-drop-target"
       class:dragging={!!draggingId}
-      class:active={dropTarget?.id === null && dropTarget.placement === "before"}
+      class:active={dropTarget && dropTarget.rowId === null && dropTarget.placement === "before"}
       role="group"
       aria-label="Root level, first position"
       ondragover={(event) => dragRoot(event, true)}
@@ -219,15 +257,15 @@
         class="region-item"
         class:active={region.id === state.selected_region_id}
         class:hovered={region.id === hoveredId}
-        class:drop-before={dropTarget?.id === region.id && dropTarget.placement === "before"}
-        class:drop-after={dropTarget?.id === region.id && dropTarget.placement === "after"}
-        class:drop-child={dropTarget?.id === region.id && dropTarget.placement === "inside"}
-        style={`--region-color: ${regionColor(region.id)}; --region-indent: ${Math.min(depth, 6) * 14}px`}
+        class:drop-before={dropTarget?.rowId === region.id && dropTarget.placement === "before"}
+        class:drop-after={dropTarget?.rowId === region.id && dropTarget.placement === "after"}
+        class:drop-child={dropTarget?.rowId === region.id && dropTarget.placement === "inside"}
+        class:drop-parent={dropTarget?.parentId === region.id && dropTarget.placement !== "inside"}
+        class:drag-source={movingIds.has(region.id)}
+        style={`--region-color: ${regionColor(region.id)}; --region-indent: ${Math.min(depth, 6) * indent}px`}
         data-depth={depth}
         role="group"
         aria-label={`Region ${index + 1}`}
-        ondragover={(event) => dragOver(event, region, depth)}
-        ondrop={drop}
         onpointerenter={() => (hoveredId = region.id)}
         onpointerleave={() => (hoveredId = null)}
       >
@@ -237,9 +275,11 @@
             class="drag-handle quiet"
             draggable="true"
             aria-label={`Drag to reorder region ${index + 1}`}
-            title="Drag onto a row’s center to nest, onto its edges to reorder, or into the left gutter to unnest"
+            title="Drag onto a row’s center to nest, or between rows and sideways to pick the nesting level"
             ondragstart={(event) => {
               draggingId = region.id;
+              dragX = event.clientX;
+              dragDepth = depth;
               event.dataTransfer?.setData("text/plain", region.id);
               if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
             }}
@@ -299,7 +339,7 @@
     <div
       class="root-drop-target"
       class:dragging={!!draggingId}
-      class:active={dropTarget?.id === null && dropTarget.placement === "after"}
+      class:active={dropTarget && dropTarget.rowId === null && dropTarget.placement === "after"}
       role="group"
       aria-label="Root level, last position"
       ondragover={(event) => dragRoot(event, false)}

@@ -229,6 +229,12 @@
   box-shadow: inset 0 0 0 1px var(--accent);
   background: var(--accent-bg);
 }
+.neriss-layout-editor .region-item.drop-parent .region-row {
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+}
+.neriss-layout-editor .region-item.drag-source {
+  opacity: 0.45;
+}
 .neriss-layout-editor .root-drop-target {
   height: 16px;
   border: 1px solid transparent;
@@ -385,17 +391,18 @@
 .neriss-layout-editor .region-item.drop-after::after {
   content: "";
   position: absolute;
-  left: 0;
+  left: var(--drop-indent);
   right: 0;
-  height: 2px;
-  background: var(--accent);
+  height: 8px;
+  border-left: 2px solid var(--accent);
+  background: linear-gradient(var(--accent), var(--accent)) center / 100% 2px no-repeat;
   z-index: 1;
 }
 .neriss-layout-editor .region-item.drop-before::before {
-  top: -1px;
+  top: -4px;
 }
 .neriss-layout-editor .region-item.drop-after::after {
-  bottom: -1px;
+  bottom: -4px;
 }
 .neriss-layout-editor input[type="checkbox"] {
   width: 14px;

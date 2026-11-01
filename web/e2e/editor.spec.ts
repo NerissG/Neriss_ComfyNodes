@@ -712,21 +712,22 @@ for (const model of ["moss", "ideogram"] satisfies EditorModel[]) {
     expect(state.elements.at(-1)?.id).toBe(childId);
 
     await page.getByRole("combobox", { name: "Parent", exact: true }).selectOption("window");
-    // The indentation gutter is a root drop surface even beside the moving row itself.
+    // Dragging left beside the moving row itself outdents it to the parent's level, right after the parent.
     await dragReader().dragTo(readerRow.locator(".."), { targetPosition: { x: 2, y: 2 } });
     state = await readState(page);
-    expect(state.elements[0].id).toBe("reader");
-    expect(state.elements[0].parent_id).toBeNull();
-    expect(state.elements[1].parent_id).toBe("reader");
+    expect(state.elements[0].id).toBe("window");
+    expect(state.elements[1].id).toBe("reader");
+    expect(state.elements[1].parent_id).toBeNull();
+    expect(state.elements[2].parent_id).toBe("reader");
     await expect(page.locator(".region-item .region-details")).toHaveCount(0);
     const rowHeights = await page
       .locator(".region-row")
       .evaluateAll((rows) => rows.map((row) => row.getBoundingClientRect().height));
     expect(rowHeights.every((height) => height <= 28)).toBe(true);
     await expect(readerRow.getByRole("checkbox")).toBeVisible();
-    await expect(readerRow.getByRole("button", { name: "Zoom to region 1", exact: true })).toBeVisible();
-    await expect(readerRow.getByRole("button", { name: "Add child to region 1", exact: true })).toBeVisible();
-    await expect(readerRow.getByRole("button", { name: "Delete region 1", exact: true })).toBeVisible();
+    await expect(readerRow.getByRole("button", { name: "Zoom to region 2", exact: true })).toBeVisible();
+    await expect(readerRow.getByRole("button", { name: "Add child to region 2", exact: true })).toBeVisible();
+    await expect(readerRow.getByRole("button", { name: "Delete region 2", exact: true })).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath("compact-outline.png") });
     await page.setViewportSize({ width: 600, height: 800 });
     expect(
@@ -902,6 +903,50 @@ test("drag reordering retains selection and stable region colors", async ({ page
   expect(state.elements[0].id).toBe("reader");
   expect(state.selected_region_id).toBe("reader");
   expect(await page.locator('.region-row[data-region-id="reader"]').locator("..").getAttribute("style")).toBe(color);
+});
+
+test("drop indicator shows the nesting depth picked by horizontal movement", async ({ page }, testInfo) => {
+  await openEditor(page);
+  const handle = page.getByRole("button", { name: "Drag to reorder region 2", exact: true });
+  const bounds = await handle.boundingBox();
+  expect(bounds).not.toBeNull();
+  if (!bounds) return;
+  const x = bounds.x + bounds.width / 2;
+  const y = bounds.y + bounds.height / 2;
+  const readerItem = page.locator('.region-row[data-region-id="reader"]').locator("..");
+  const windowItem = page.locator('.region-row[data-region-id="window"]').locator("..");
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x + 2, y, { steps: 2 });
+  await page.mouse.move(x + 20, y, { steps: 4 });
+  await expect(readerItem).toHaveClass(/drop-before/);
+  await expect(windowItem).toHaveClass(/drop-parent/);
+  await expect(page.locator(".region-list")).toHaveAttribute("style", /--drop-indent: 14px/);
+  await page.screenshot({ path: testInfo.outputPath("drop-depth.png") });
+  await page.mouse.move(x, y, { steps: 4 });
+  await expect(windowItem).not.toHaveClass(/drop-parent/);
+  await expect(page.locator(".region-list")).toHaveAttribute("style", /--drop-indent: 0px/);
+  await page.mouse.move(x + 20, y, { steps: 4 });
+  await page.mouse.up();
+  let state = await readState(page);
+  expect(state.elements[1].id).toBe("reader");
+  expect(state.elements[1].parent_id).toBe("window");
+
+  // Overshooting past the list's left edge while outdenting still drops.
+  const nested = await handle.boundingBox();
+  const list = await page.locator(".region-list").boundingBox();
+  expect(nested && list).toBeTruthy();
+  if (!nested || !list) return;
+  await page.mouse.move(nested.x + nested.width / 2, y);
+  await page.mouse.down();
+  await page.mouse.move(nested.x + nested.width / 2 - 2, y, { steps: 2 });
+  await page.mouse.move(list.x - 6, y, { steps: 6 });
+  await expect(readerItem).toHaveClass(/drop-before/);
+  await expect(page.locator(".region-list")).toHaveAttribute("style", /--drop-indent: 0px/);
+  await page.mouse.up();
+  state = await readState(page);
+  expect(state.elements[1].id).toBe("reader");
+  expect(state.elements[1].parent_id).toBeNull();
 });
 
 test("sidebar resizing persists and narrow layouts have no horizontal overflow", async ({ page }) => {
