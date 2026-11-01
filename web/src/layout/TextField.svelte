@@ -1,4 +1,6 @@
 <script lang="ts">
+  import Icon from "@/ui/Icon.svelte";
+
   export let label: string;
   export let value: string;
   export let placeholder = "";
@@ -24,8 +26,8 @@
 <div class="text-field" class:expanded>
   <div class="field-heading">
     <span class="field-label">{label}</span>
-    <button type="button" class="quiet" aria-expanded={expanded} onclick={() => (expanded = !expanded)}>
-      {expanded ? "Done" : "Expand"}
+    <button type="button" class="quiet with-icon" aria-expanded={expanded} onclick={() => (expanded = !expanded)}>
+      <Icon name={expanded ? "collapse" : "expand"} size={12} />{expanded ? "Done" : "Expand"}
     </button>
   </div>
   <textarea

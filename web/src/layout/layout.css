@@ -321,6 +321,8 @@
   padding: 3px 6px;
 }
 .neriss-layout-editor .region-detail-heading button.region-reorder {
+  display: grid;
+  place-items: center;
   width: 26px;
   padding: 0;
 }

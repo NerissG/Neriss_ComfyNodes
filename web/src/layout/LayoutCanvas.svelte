@@ -16,6 +16,7 @@
   import { canvasTools, type CanvasTool } from "./tools";
   import { uiSettings } from "@/settings/store";
   import { matchShortcut, shortcutLabel } from "@/settings/shortcuts";
+  import Icon from "@/ui/Icon.svelte";
 
   export let state: EditorState;
   export let model: EditorModel;
@@ -342,7 +343,7 @@
               cancelInteraction();
               tool = item.id;
             }}
-            ><svg viewBox="0 0 24 24" aria-hidden="true"><path d={item.icon} /></svg><span class="tool-tip"
+            ><Icon name={item.icon} size={17} /><span class="tool-tip"
               >{item.label}{#if shortcutLabel(item.command, shortcuts)}<kbd
                   >{shortcutLabel(item.command, shortcuts)}</kbd
                 >{/if}{#if item.hint}<small>{item.hint}</small>{/if}</span

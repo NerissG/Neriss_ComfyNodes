@@ -6,6 +6,7 @@
   import PaletteField from "./PaletteField.svelte";
   import TextField from "./TextField.svelte";
   import NumberField from "@/ui/NumberField.svelte";
+  import Icon, { type IconName } from "@/ui/Icon.svelte";
 
   export let state: EditorState;
   export let model: EditorModel;
@@ -32,6 +33,12 @@
   $: siblingIndex = siblings.findIndex((region) => region.id === selected?.id);
   $: selectedType =
     model === "moss" ? (selected?.label ?? (selected?.type === "text" ? "text" : "object")) : selected?.type;
+  const typeIcons: Partial<Record<string, IconName>> = {
+    obj: "object",
+    object: "object",
+    character: "character",
+    text: "text",
+  };
   $: typeOptions = [
     { value: model === "moss" ? "object" : "obj", label: "Object" },
     ...(model === "moss" ? [{ value: "character", label: "Character" }] : []),
@@ -284,14 +291,14 @@
           <h2 title={regionTitle(region, state.elements.indexOf(region))}>
             {regionTitle(region, state.elements.indexOf(region))}
           </h2>
-          <button type="button" class="quiet" onclick={() => onredraw(region.id)}
-            >{region.bbox ? "Redraw" : "Draw box"}</button
+          <button type="button" class="quiet with-icon" onclick={() => onredraw(region.id)}
+            ><Icon name="pencil" size={14} />{region.bbox ? "Redraw" : "Draw box"}</button
           >
           <button
             type="button"
-            class="quiet"
+            class="quiet with-icon"
             title="Duplicate region and its children"
-            onclick={() => onduplicate([region.id])}>Duplicate</button
+            onclick={() => onduplicate([region.id])}><Icon name="copy" size={14} />Duplicate</button
           >
           <button
             type="button"
@@ -299,7 +306,7 @@
             disabled={siblingIndex === 0}
             onclick={() => onchange(moveRegion(state, region.id, region.parent_id ?? null, siblingIndex - 1))}
             title="Move region up"
-            aria-label="Move region up">↑</button
+            aria-label="Move region up"><Icon name="arrow-up" size={14} /></button
           >
           <button
             type="button"
@@ -307,7 +314,7 @@
             disabled={siblingIndex === siblings.length - 1}
             onclick={() => onchange(moveRegion(state, region.id, region.parent_id ?? null, siblingIndex + 2))}
             title="Move region down"
-            aria-label="Move region down">↓</button
+            aria-label="Move region down"><Icon name="arrow-down" size={14} /></button
           >
         </div>
         <div class="region-metadata">
@@ -315,8 +322,10 @@
             <span class="region-metadata-label" aria-hidden="true">Type</span>
             <div class="region-type-options">
               {#each typeOptions as option (option.value)}
+                {@const icon = typeIcons[option.value]}
                 <button
                   type="button"
+                  class="with-icon"
                   class:active={selectedType === option.value}
                   aria-label={`Set type to ${option.label}`}
                   aria-pressed={selectedType === option.value}
@@ -324,7 +333,8 @@
                   onclick={() =>
                     model === "moss"
                       ? updateLabel(option.value)
-                      : update({ type: option.value === "text" ? "text" : "obj" })}>{option.label}</button
+                      : update({ type: option.value === "text" ? "text" : "obj" })}
+                  >{#if icon}<Icon name={icon} size={13} />{/if}{option.label}</button
                 >
               {/each}
             </div>
