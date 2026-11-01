@@ -831,7 +831,7 @@
   .selection-outline {
     fill: none;
     stroke: #0d0d0d;
-    stroke-width: 4;
+    stroke-width: 6;
     vector-effect: non-scaling-stroke;
     pointer-events: none;
   }
@@ -840,6 +840,18 @@
     fill-opacity: 0.09;
     stroke: var(--accent);
     stroke-width: 2;
+    stroke-dasharray: 8 4;
+    animation: march 0.8s linear infinite;
+  }
+  @keyframes march {
+    to {
+      stroke-dashoffset: -12;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .selected .region-rect {
+      animation: none;
+    }
   }
   .hovered .region-rect,
   .region:focus-visible .region-rect {
