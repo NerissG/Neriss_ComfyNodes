@@ -179,11 +179,12 @@
       onchange={(value) => onchange(setAspectRatio({ ...state, side_step: Math.round(value) }, ...ratio))}
     />
   </div>
+  <!-- Native number steps count from min, so stepped fields use their step as min. -->
   <div class="grid two">
     <NumberField
       label="Width"
       value={state.width}
-      min={1}
+      min={state.side_step}
       step={state.side_step}
       disabled={locked}
       onchange={(value) => dimension("width", value)}
@@ -191,7 +192,7 @@
     <NumberField
       label="Height"
       value={state.height}
-      min={1}
+      min={state.side_step}
       step={state.side_step}
       disabled={locked}
       onchange={(value) => dimension("height", value)}
@@ -217,14 +218,14 @@
     {#if state.size_mode === "squared"}<NumberField
         label="Square side"
         value={Math.round(Math.sqrt(state.megapixels * 1_000_000))}
-        min={1}
+        min={state.side_step}
         step={state.side_step}
         disabled={locked}
         onchange={(value) => targetPixels(value * value)}
       />{:else}<NumberField
         label="Megapixels"
         value={state.megapixels}
-        min={0.000001}
+        min={0.05}
         step={0.05}
         disabled={locked}
         onchange={(value) => targetPixels(value * 1_000_000)}

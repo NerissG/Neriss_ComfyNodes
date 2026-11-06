@@ -1062,6 +1062,27 @@ test("moss: tag edits reject blank and duplicate names without losing the draft"
   expect((await readState(page)).moss_meta).toEqual(["illustration", "paper"]);
 });
 
+test("stepping size fields stays on the multiple and megapixel grid", async ({ page }) => {
+  await openEditor(page);
+  await page.getByRole("button", { name: "Canvas", exact: true }).click();
+  const width = page.getByRole("spinbutton", { name: "Width", exact: true });
+  await width.press("ArrowUp");
+  expect((await readState(page)).width).toBe(1088);
+  const megapixels = page.getByRole("spinbutton", { name: "Megapixels", exact: true });
+  await megapixels.fill("1");
+  await megapixels.press("Enter");
+  await megapixels.press("ArrowUp");
+  await expect(megapixels).toHaveValue("1.05");
+  await page.getByRole("button", { name: "Squared", exact: true }).click();
+  const side = page.getByRole("spinbutton", { name: "Square side", exact: true });
+  await side.fill("1000");
+  await side.press("Enter");
+  await side.press("ArrowUp");
+  await expect(side).toHaveValue("1024");
+  await side.press("ArrowUp");
+  await expect(side).toHaveValue("1088");
+});
+
 test("numeric fields accept intermediate edits and validate on commit", async ({ page }) => {
   await openEditor(page);
   await page.getByRole("button", { name: "Canvas", exact: true }).click();
