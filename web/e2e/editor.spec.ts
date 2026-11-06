@@ -5,6 +5,7 @@ import { expect, type Page } from "@playwright/test";
 import { parseEditorState, type EditorModel } from "../src/layout/state";
 import { editorNodeIds } from "../src/layout/models";
 import { IdeogramV4JsonPromptSchema } from "../src/layout/ideogram/schema";
+import { mossPromptSchema } from "../src/layout/moss/schema";
 import { mockUiSettings } from "./settings-mock";
 import { test } from "./fixtures";
 
@@ -27,6 +28,17 @@ async function openEditor(page: Page, model: EditorModel = "moss", empty = false
 async function readState(page: Page) {
   // A failed parse is a test failure, never a fallback to another state.
   return parseEditorState(await page.getByTestId("saved-state").textContent())._unsafeUnwrap();
+}
+
+async function openMossTags(page: Page, tags: string[]) {
+  await openEditor(page);
+  await page.getByRole("button", { name: "Scene & style", exact: true }).click();
+  const input = page.getByRole("textbox", { name: "Add a tag", exact: true });
+  for (const tag of tags) {
+    await input.fill(tag);
+    await input.press("Enter");
+  }
+  await expect(page.getByRole("list", { name: "Saved tags" }).getByRole("listitem")).toHaveCount(tags.length);
 }
 
 async function drawSelectedRegion(page: Page) {
@@ -875,6 +887,179 @@ test("scene captions resize past the automatic height limit and retain their siz
   await caption.press("Escape");
   expect((await caption.boundingBox())?.height).toBe(targetHeight);
   expect((await readState(page)).high_level_description).toBe(`${longText} More detail.`);
+});
+
+test("moss: tags drag before and after across wrapped rows, undo, persist and export in order", async ({ page }) => {
+  const tags = ["hand-painted illustration", "warm amber lighting", "muted editorial palette", "textured paper"];
+  await openMossTags(page, tags);
+  const original = await readState(page);
+  const list = page.getByRole("list", { name: "Saved tags" });
+  const rows = list.getByRole("listitem");
+  const first = await rows.first().boundingBox();
+  const last = await rows.last().boundingBox();
+  expect(first).not.toBeNull();
+  expect(last).not.toBeNull();
+  if (!first || !last) return;
+  expect(last.y).toBeGreaterThan(first.y);
+  await list.getByRole("button", { name: `Drag to reorder tag ${tags[0]}`, exact: true }).dragTo(rows.last(), {
+    targetPosition: { x: last.width - 2, y: last.height / 2 },
+  });
+  const reordered = [...tags.slice(1), tags[0]];
+  expect(await readState(page)).toEqual({ ...original, moss_meta: reordered });
+  await expect(list.locator(".drag-handle span:last-child")).toHaveText(reordered);
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
+  expect(await readState(page)).toEqual(original);
+  await page.getByRole("button", { name: "Redo", exact: true }).click();
+  expect((await readState(page)).moss_meta).toEqual(reordered);
+  await list.getByRole("button", { name: `Drag to reorder tag ${tags[0]}`, exact: true }).dragTo(rows.first(), {
+    targetPosition: { x: 2, y: first.height / 2 },
+  });
+  expect(await readState(page)).toEqual(original);
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
+  await page.getByRole("button", { name: "Close editor", exact: true }).click();
+  await page.getByRole("button", { name: "Open MOSS editor", exact: true }).click();
+  expect((await readState(page)).moss_meta).toEqual(reordered);
+  await page.getByRole("button", { name: "Scene & style", exact: true }).click();
+  await expect(list.locator(".drag-handle span:last-child")).toHaveText(reordered);
+  await page.getByRole("button", { name: "Import and export options" }).click();
+  await page.getByRole("button", { name: "Preview", exact: true }).click();
+  const preview = page.getByRole("region", { name: "Prompt JSON preview" });
+  const prompt = mossPromptSchema.parse(JSON.parse(await preview.locator("pre").innerText()));
+  expect(prompt.summary.meta).toEqual(reordered);
+});
+
+test("moss: arrow keys reorder tags, retain focus and leave add/remove usable", async ({ page }) => {
+  const tags = ["illustration", "warm light", "paper"];
+  await openMossTags(page, tags);
+  const original = await readState(page);
+  const handle = page.getByRole("button", { name: "Drag to reorder tag illustration", exact: true });
+  await handle.focus();
+  await handle.press("ArrowLeft");
+  expect(await readState(page)).toEqual(original);
+  await handle.press("ArrowRight");
+  await expect(handle).toBeFocused();
+  expect((await readState(page)).moss_meta).toEqual(["warm light", "illustration", "paper"]);
+  await expect(page.locator(".tag-field").getByRole("status")).toHaveText("illustration moved to position 2 of 3.");
+  await handle.press("ArrowDown");
+  await expect(handle).toBeFocused();
+  expect((await readState(page)).moss_meta).toEqual(["warm light", "paper", "illustration"]);
+  await handle.press("ArrowRight");
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
+  expect((await readState(page)).moss_meta).toEqual(["warm light", "illustration", "paper"]);
+  await handle.focus();
+  await handle.press("ArrowUp");
+  await expect(handle).toBeFocused();
+  expect(await readState(page)).toEqual(original);
+  await page.getByRole("button", { name: "Remove tag warm light", exact: true }).click();
+  expect((await readState(page)).moss_meta).toEqual(["illustration", "paper"]);
+  const input = page.getByRole("textbox", { name: "Add a tag", exact: true });
+  await input.fill("new tag");
+  await page.getByRole("button", { name: "Add tag", exact: true }).click();
+  expect((await readState(page)).moss_meta).toEqual(["illustration", "paper", "new tag"]);
+});
+
+test("moss: cancelled, self and foreign tag drops do not change state", async ({ page }) => {
+  await openMossTags(page, ["illustration", "warm light", "paper"]);
+  const original = await readState(page);
+  const list = page.getByRole("list", { name: "Saved tags" });
+  const handle = list.getByRole("button", { name: "Drag to reorder tag illustration", exact: true });
+  await handle.dragTo(handle);
+  expect(await readState(page)).toEqual(original);
+  const first = await handle.boundingBox();
+  const last = await list.getByRole("listitem").last().boundingBox();
+  expect(first).not.toBeNull();
+  expect(last).not.toBeNull();
+  if (!first || !last) return;
+  await page.mouse.move(first.x + first.width / 2, first.y + first.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(last.x + last.width - 2, last.y + last.height / 2, { steps: 10 });
+  await expect(list.locator(".drop-after")).toHaveCount(1);
+  await page.keyboard.press("Escape");
+  await page.mouse.up();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await expect(list.locator(".drop-after, .drop-before, .dragging")).toHaveCount(0);
+  expect(await readState(page)).toEqual(original);
+  const dataTransfer = await page.evaluateHandle(() => {
+    const data = new DataTransfer();
+    data.setData("text/plain", "foreign tag");
+    return data;
+  });
+  await list.getByRole("listitem").first().dispatchEvent("dragover", { dataTransfer });
+  await list.getByRole("listitem").first().dispatchEvent("drop", { dataTransfer });
+  await dataTransfer.dispose();
+  expect(await readState(page)).toEqual(original);
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
+  expect((await readState(page)).moss_meta).toEqual([]);
+});
+
+test("moss: double-click edits tags inline with Enter, blur, Escape and undo/redo", async ({ page }) => {
+  await openMossTags(page, ["illustration", "warm light", "paper"]);
+  const original = await readState(page);
+  const list = page.getByRole("list", { name: "Saved tags" });
+  await list.getByRole("button", { name: "Drag to reorder tag warm light", exact: true }).dblclick();
+  const input = list.getByRole("textbox", { name: "Edit tag warm light", exact: true });
+  await expect(input).toBeFocused();
+  await expect(input).toHaveValue("warm light");
+  await input.pressSequentially("  golden light  ");
+  expect(await readState(page)).toEqual(original);
+  await input.press("Enter");
+  const renamed = { ...original, moss_meta: ["illustration", "golden light", "paper"] };
+  expect(await readState(page)).toEqual(renamed);
+  const renamedHandle = list.getByRole("button", { name: "Drag to reorder tag golden light", exact: true });
+  await expect(renamedHandle).toBeFocused();
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
+  expect(await readState(page)).toEqual(original);
+  await page.getByRole("button", { name: "Redo", exact: true }).click();
+  expect(await readState(page)).toEqual(renamed);
+  await renamedHandle.dblclick();
+  const renamedInput = list.getByRole("textbox", { name: "Edit tag golden light", exact: true });
+  await renamedInput.fill("discarded edit");
+  await renamedInput.press("Escape");
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await expect(renamedHandle).toBeFocused();
+  expect(await readState(page)).toEqual(renamed);
+  await renamedHandle.press("F2");
+  await renamedInput.fill("soft light");
+  await page.getByRole("textbox", { name: "Add a tag", exact: true }).click();
+  expect((await readState(page)).moss_meta).toEqual(["illustration", "soft light", "paper"]);
+  await expect(list.getByRole("textbox")).toHaveCount(0);
+  await list.getByRole("button", { name: "Drag to reorder tag soft light", exact: true }).press("Enter");
+  const softInput = list.getByRole("textbox", { name: "Edit tag soft light", exact: true });
+  await expect(softInput).toBeFocused();
+  await softInput.press("Escape");
+  await page.getByRole("button", { name: "Close editor", exact: true }).click();
+  await page.getByRole("button", { name: "Open MOSS editor", exact: true }).click();
+  expect((await readState(page)).moss_meta).toEqual(["illustration", "soft light", "paper"]);
+});
+
+test("moss: tag edits reject blank and duplicate names without losing the draft", async ({ page }) => {
+  await openMossTags(page, ["illustration", "warm light", "paper"]);
+  const original = await readState(page);
+  const list = page.getByRole("list", { name: "Saved tags" });
+  await list.getByRole("button", { name: "Drag to reorder tag warm light", exact: true }).dblclick();
+  const input = list.getByRole("textbox", { name: "Edit tag warm light", exact: true });
+  await input.fill("   ");
+  await input.press("Enter");
+  await expect(input).toBeFocused();
+  await expect(input).toHaveAttribute("aria-invalid", "true");
+  await expect(page.getByRole("alert")).toHaveText("Enter a tag.");
+  expect(await readState(page)).toEqual(original);
+  await input.fill(" illustration ");
+  await page.getByRole("textbox", { name: "Add a tag", exact: true }).click();
+  await expect(page.getByRole("alert")).toHaveText("This tag already exists.");
+  await expect(input).toHaveValue(" illustration ");
+  expect(await readState(page)).toEqual(original);
+  await input.fill("cool light");
+  await input.press("Enter");
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  expect((await readState(page)).moss_meta).toEqual(["illustration", "cool light", "paper"]);
+  const target = list.getByRole("listitem").first();
+  await list.getByRole("button", { name: "Drag to reorder tag cool light", exact: true }).dragTo(target, {
+    targetPosition: { x: 2, y: 2 },
+  });
+  expect((await readState(page)).moss_meta).toEqual(["cool light", "illustration", "paper"]);
+  await page.getByRole("button", { name: "Remove tag cool light", exact: true }).click();
+  expect((await readState(page)).moss_meta).toEqual(["illustration", "paper"]);
 });
 
 test("numeric fields accept intermediate edits and validate on commit", async ({ page }) => {
