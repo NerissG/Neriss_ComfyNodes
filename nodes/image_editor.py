@@ -11,7 +11,7 @@ import torch
 from aiohttp import web
 from comfy_api.latest import io
 
-from ..shared import AppError, Err, Ok, Result, editor_errors
+from ..shared import EditorError, Err, Ok, Result
 from ..shared.json_store import load_store, request_json, save_store, store_response
 from ..shared.layout_editor import (
     DEFAULT_STYLE,
@@ -81,21 +81,21 @@ def build_ideogram_prompt(layout: EditorLayout) -> dict[str, object]:
     return prompt
 
 
-def import_ideogram_prompt(layout: EditorLayout, value: str) -> Result[EditorLayout, AppError]:
+def import_ideogram_prompt(layout: EditorLayout, value: str) -> Result[EditorLayout, EditorError]:
     parsed = parse_json_object(value, "Ideogram prompt")
     if isinstance(parsed, Err):
         return parsed
     prompt = parsed.value
     if not prompt or set(prompt) - {"high_level_description", "style_description", "compositional_deconstruction"}:
-        return Err(editor_errors.runtime("Invalid Ideogram prompt fields"))
+        return Err(EditorError("Invalid Ideogram prompt fields"))
     composition = prompt.get("compositional_deconstruction", {"background": "", "elements": []})
     if not isinstance(composition, dict):
-        return Err(editor_errors.runtime("Ideogram prompt requires compositional_deconstruction.elements"))
+        return Err(EditorError("Ideogram prompt requires compositional_deconstruction.elements"))
     if set(composition) - {"background", "elements"}:
-        return Err(editor_errors.runtime("Invalid Ideogram composition fields"))
+        return Err(EditorError("Invalid Ideogram composition fields"))
     elements = composition.get("elements")
     if not isinstance(elements, list) or len(elements) > MAX_REGIONS:
-        return Err(editor_errors.runtime("Ideogram prompt requires compositional_deconstruction.elements"))
+        return Err(EditorError("Ideogram prompt requires compositional_deconstruction.elements"))
     regions: list[LayoutRegion] = []
     caption = prompt.get("high_level_description", "")
     background = composition.get("background", "")
@@ -104,23 +104,23 @@ def import_ideogram_prompt(layout: EditorLayout, value: str) -> Result[EditorLay
         or not isinstance(background, str)
         or max(len(caption), len(background)) > MAX_TEXT_LENGTH
     ):
-        return Err(editor_errors.runtime("Ideogram scene description and background must be bounded strings"))
+        return Err(EditorError("Ideogram scene description and background must be bounded strings"))
     for index, item in enumerate(elements, 1):
         if not isinstance(item, dict):
-            return Err(editor_errors.runtime(f"Ideogram element {index} must be an object"))
+            return Err(EditorError(f"Ideogram element {index} must be an object"))
         kind = item.get("type")
         allowed_fields = {"type", "desc", "bbox", "color_palette"} | ({"text"} if kind == "text" else set())
         if set(item) - allowed_fields:
-            return Err(editor_errors.runtime(f"Ideogram element {index} contains invalid fields"))
+            return Err(EditorError(f"Ideogram element {index} contains invalid fields"))
         bbox = read_bbox(item.get("bbox"))
         caption = item.get("desc")
         text = item.get("text", "")
         if (kind != "obj" and kind != "text") or ("bbox" in item and bbox is None):
-            return Err(editor_errors.runtime(f"Ideogram element {index} has an invalid type or box"))
+            return Err(EditorError(f"Ideogram element {index} has an invalid type or box"))
         if not isinstance(caption, str) or not isinstance(text, str):
-            return Err(editor_errors.runtime(f"Ideogram element {index} description and text must be strings"))
+            return Err(EditorError(f"Ideogram element {index} description and text must be strings"))
         if max(len(caption), len(text)) > MAX_TEXT_LENGTH or not valid_palette(item.get("color_palette", []), 5):
-            return Err(editor_errors.runtime(f"Ideogram element {index} has oversized text or an invalid palette"))
+            return Err(EditorError(f"Ideogram element {index} has oversized text or an invalid palette"))
         regions.append(
             LayoutRegion(
                 "text" if kind == "text" else "obj",
@@ -137,7 +137,7 @@ def import_ideogram_prompt(layout: EditorLayout, value: str) -> Result[EditorLay
     }
     style = prompt.get("style_description")
     if "style_description" in prompt and not valid_prompt_style(style):
-        return Err(editor_errors.runtime("Invalid Ideogram style description"))
+        return Err(EditorError("Invalid Ideogram style description"))
     if isinstance(style, dict):
         state["style_description"] = {**DEFAULT_STYLE, **style, "mode": "photo" if "photo" in style else "art"}
     return Ok(replace(layout, state=state, regions=regions))

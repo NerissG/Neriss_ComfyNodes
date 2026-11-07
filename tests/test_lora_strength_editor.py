@@ -263,16 +263,15 @@ class ExecutionTests(unittest.TestCase):
             ({"q.set_weight": torch.ones(2, 2)}, "weight replacements"),
         ):
             save_file(weights, str(self.path))
-            with self.assertRaisesRegex(ValueError, message):
-                self.execute(model, {})
-        with self.assertRaisesRegex(ValueError, "selection changed"):
-            lora.NerissLoraBlockStrengthEditor.execute(
-                model,
-                self.path.name,
-                1,
-                1,
-                json.dumps({"version": 1, "lora_name": "other", "overrides": {"q": 0.5}}),
-            )
+            self.assertIn(message, self.execute(model, {}).block_execution)
+        output = lora.NerissLoraBlockStrengthEditor.execute(
+            model,
+            self.path.name,
+            1,
+            1,
+            json.dumps({"version": 1, "lora_name": "other", "overrides": {"q": 0.5}}),
+        )
+        self.assertIn("selection changed", output.block_execution)
 
     def test_diff_bias_and_weight_receive_the_same_multiplier(self) -> None:
         save_file(

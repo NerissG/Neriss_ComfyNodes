@@ -7,11 +7,11 @@ from typing import TypedDict
 import folder_paths
 from aiohttp import web
 from comfy_api.latest import io
-from server import PromptServer
 
 from ..shared import Err
 from ..shared.json_store import load_store, request_json, save_store, store_response
-from ..shared.limits import MAX_PRESETS, MAX_TEXT_LENGTH, finite_number
+from ..shared.limits import MAX_PRESETS, MAX_TEXT_LENGTH
+from ..shared.server import routes
 
 RESOLUTION_PRESET_FILE = "resolution_presets.json"
 
@@ -70,32 +70,7 @@ def default_resolution_presets() -> list[ResolutionPreset]:
     return [{"name": preset["name"], "x": preset["x"], "y": preset["y"]} for preset in DEFAULT_RESOLUTION_PRESETS]
 
 
-def coerce_int(value: object, default: int, minimum: int) -> int:
-    if isinstance(value, bool):
-        return default
-    if isinstance(value, int):
-        return max(minimum, value)
-    if isinstance(value, float) and math.isfinite(value):
-        return max(minimum, round(value))
-    return default
-
-
-def coerce_float(value: object, default: float, minimum: float) -> float:
-    if isinstance(value, bool):
-        return default
-    number = finite_number(value)
-    if number is not None:
-        return max(minimum, number)
-    return default
-
-
 SIZING_MODES: list[str] = ["megapixels", "squared"]
-
-
-def normalize_sizing_mode(value: object) -> str:
-    if isinstance(value, str) and value in SIZING_MODES:
-        return value
-    return "megapixels"
 
 
 def calculate_resolution(aspect_x: int, aspect_y: int, target_pixels: float, multiple: int) -> tuple[int, int]:
@@ -105,10 +80,6 @@ def calculate_resolution(aspect_x: int, aspect_y: int, target_pixels: float, mul
     width = max(multiple, round(raw_width / multiple) * multiple)
     height = max(multiple, round(raw_height / multiple) * multiple)
     return width, height
-
-
-prompt_server = getattr(PromptServer, "instance")  # noqa: B009 - Comfy exposes this singleton dynamically.
-routes = getattr(prompt_server, "routes")  # noqa: B009 - Keep dynamic for ty compatibility.
 
 
 @routes.get("/neriss_comfynodes/resolution/presets")
@@ -133,8 +104,6 @@ async def save_resolution_presets(request: web.Request) -> web.Response:
             {"error": "Expected object with unique presets containing name, x, and y"},
             status=400,
         )
-    if len(presets) == 0:
-        return web.json_response({"error": "At least one preset is required"}, status=400)
 
     result = save_store(
         get_resolution_presets_path(),
@@ -185,7 +154,7 @@ class NerissResolutionSelector(io.ComfyNode):
                     socketless=True,
                     tooltip=(
                         "megapixels targets total pixels; squared targets a square side length "
-                        "(total pixels = squared squared)."
+                        "(total pixels = squared x squared)."
                     ),
                 ),
                 io.Float.Input(
@@ -205,7 +174,7 @@ class NerissResolutionSelector(io.ComfyNode):
                     step=64,
                     socketless=True,
                     tooltip=(
-                        "Square side length in pixels; total pixels = squared squared, "
+                        "Square side length in pixels; total pixels = squared x squared, "
                         "rounded to the selected multiple."
                     ),
                 ),
@@ -273,24 +242,24 @@ class NerissResolutionSelector(io.ComfyNode):
         return True if isinstance(preset, str) else "Preset label must be a string."
 
     @classmethod
-    def execute(cls, **kwargs: object) -> io.NodeOutput:
-        if kwargs.get("custom") is True:
-            aspect_x = coerce_int(kwargs.get("aspect_x"), 1, 1)
-            aspect_y = coerce_int(kwargs.get("aspect_y"), 1, 1)
-        else:
-            aspect_x = coerce_int(kwargs.get("preset_aspect_x"), 0, 1)
-            aspect_y = coerce_int(kwargs.get("preset_aspect_y"), 0, 1)
-            if aspect_x < 1 or aspect_y < 1:
-                return io.NodeOutput(block_execution="Selected resolution preset has no saved aspect-ratio snapshot.")
-
-        if kwargs.get("flip") is True:
+    def execute(  # ty: ignore[invalid-method-override] - Comfy invokes schema-defined keyword inputs.
+        cls,
+        flip: bool,
+        mode: str,
+        megapixels: float,
+        squared: int,
+        multiple: int,
+        custom: bool,
+        aspect_x: int,
+        aspect_y: int,
+        preset_aspect_x: int,
+        preset_aspect_y: int,
+        **_kwargs: object,
+    ) -> io.NodeOutput:
+        if not custom:
+            aspect_x, aspect_y = preset_aspect_x, preset_aspect_y
+        if flip:
             aspect_x, aspect_y = aspect_y, aspect_x
-
-        mode = normalize_sizing_mode(kwargs.get("mode"))
-        if mode == "squared":
-            target_pixels = float(coerce_int(kwargs.get("squared"), 1024, 64) ** 2)
-        else:
-            target_pixels = coerce_float(kwargs.get("megapixels"), 1.0, 0.01) * 1_000_000
-        multiple = coerce_int(kwargs.get("multiple"), 16, 1)
+        target_pixels = float(squared**2) if mode == "squared" else megapixels * 1_000_000
         width, height = calculate_resolution(aspect_x, aspect_y, target_pixels, multiple)
         return io.NodeOutput(width, height)

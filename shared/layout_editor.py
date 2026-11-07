@@ -19,9 +19,8 @@ import torch
 from aiohttp import BodyPartReader, web
 from comfy_api.latest import io
 from PIL import Image, ImageDraw, ImageOps
-from server import PromptServer
 
-from . import AppError, Err, Ok, Result, editor_errors
+from . import EditorError, Err, Ok, Result
 from .json_store import load_store, parse_json, request_json, save_store, store_response
 from .limits import (
     MAX_COLORS,
@@ -33,6 +32,7 @@ from .limits import (
     finite_number,
     image_budget,
 )
+from .server import routes
 from .ui_settings import register_ui_settings_routes
 
 BBox: TypeAlias = tuple[float, float, float, float]
@@ -81,17 +81,17 @@ class EditorLayout:
     reference_image: torch.Tensor | None
 
 
-def parse_json_object(value: str, label: str) -> Result[dict[str, object], AppError]:
+def parse_json_object(value: str, label: str) -> Result[dict[str, object], EditorError]:
     result = parse_json(value)
     if isinstance(result, Err):
-        return Err(editor_errors.runtime(f"Could not parse {label} as JSON", cause=result.error))
+        return Err(EditorError(f"Could not parse {label} as JSON"))
     parsed = result.value
     if not isinstance(parsed, dict) or not all(isinstance(key, str) for key in parsed):
-        return Err(editor_errors.runtime(f"Expected {label} to be a JSON object"))
+        return Err(EditorError(f"Expected {label} to be a JSON object"))
     return Ok({key: item for key, item in parsed.items() if isinstance(key, str)})
 
 
-def parse_state(value: str) -> Result[dict[str, object], AppError]:
+def parse_state(value: str) -> Result[dict[str, object], EditorError]:
     if not value.strip():
         return Ok(dict(DEFAULT_STATE))
     parsed = parse_json_object(value, "editor state")
@@ -99,21 +99,21 @@ def parse_state(value: str) -> Result[dict[str, object], AppError]:
         return parsed
     state = {**DEFAULT_STATE, **parsed.value}
     if type(state["version"]) is not int or state["version"] != 1:
-        return Err(editor_errors.runtime("Unsupported editor state version (expected 1)"))
+        return Err(EditorError("Unsupported editor state version (expected 1)"))
     for key in ("width", "height", "side_step"):
         dimension = state.get(key, 64)
         if type(dimension) is not int or not 1 <= dimension <= MAX_SAFE_INTEGER:
-            return Err(editor_errors.runtime(f"Editor {key} must be a positive safe integer"))
+            return Err(EditorError(f"Editor {key} must be a positive safe integer"))
     megapixels = finite_number(state.get("megapixels", 1))
     if megapixels is None or megapixels <= 0:
-        return Err(editor_errors.runtime("Editor megapixels must be positive and finite"))
+        return Err(EditorError("Editor megapixels must be positive and finite"))
     for key in ("high_level_description", "background"):
         text = state[key]
         if not isinstance(text, str) or len(text) > MAX_TEXT_LENGTH:
-            return Err(editor_errors.runtime(f"Editor {key} must be a string of at most {MAX_TEXT_LENGTH} characters"))
+            return Err(EditorError(f"Editor {key} must be a string of at most {MAX_TEXT_LENGTH} characters"))
     style = normalize_editor_style(state["style_description"])
     if style is None:
-        return Err(editor_errors.runtime("Invalid editor style"))
+        return Err(EditorError("Invalid editor style"))
     state["style_description"] = style
     meta = state["moss_meta"]
     if (
@@ -121,16 +121,16 @@ def parse_state(value: str) -> Result[dict[str, object], AppError]:
         or len(meta) > MAX_TAGS
         or not all(isinstance(tag, str) and len(tag) <= MAX_TEXT_LENGTH for tag in meta)
     ):
-        return Err(editor_errors.runtime("Invalid editor metadata tags"))
+        return Err(EditorError("Invalid editor metadata tags"))
     for key in ("reference_image_path", "reference_image_name", "selected_region_id"):
         text = state.get(key)
         if text is not None and (not isinstance(text, str) or len(text) > MAX_TEXT_LENGTH):
-            return Err(editor_errors.runtime(f"Invalid editor {key}"))
+            return Err(EditorError(f"Invalid editor {key}"))
     if state["reference_image_fit"] not in ("stretch", "contain") or state.get("selected_tool", "obj") not in (
         "obj",
         "text",
     ):
-        return Err(editor_errors.runtime("Invalid editor image fitting or selected tool"))
+        return Err(EditorError("Invalid editor image fitting or selected tool"))
     return Ok(state)
 
 
@@ -178,16 +178,16 @@ def normalize_hex_palette(value: object, maximum: int) -> tuple[str, ...]:
     ]
 
 
-def read_regions(value: object) -> Result[list[LayoutRegion], AppError]:
+def read_regions(value: object) -> Result[list[LayoutRegion], EditorError]:
     if not isinstance(value, list) or len(value) > MAX_REGIONS:
-        return Err(editor_errors.runtime("Expected editor elements to be a list"))
+        return Err(EditorError("Expected editor elements to be a list"))
     regions: list[LayoutRegion] = []
     ids: dict[str, int] = {}
     region_ids: list[str | None] = []
     parents: list[str | None] = []
     for index, item in enumerate(value, 1):
         if not isinstance(item, dict):
-            return Err(editor_errors.runtime(f"Region {index} must be an object"))
+            return Err(EditorError(f"Region {index} must be an object"))
         kind = item.get("type")
         bbox = read_bbox(item.get("bbox"))
         caption = item.get("desc", "")
@@ -197,22 +197,22 @@ def read_regions(value: object) -> Result[list[LayoutRegion], AppError]:
         parent_id = item.get("parent_id")
         if region_id is not None:
             if not isinstance(region_id, str) or not region_id or len(region_id) > MAX_TEXT_LENGTH or region_id in ids:
-                return Err(editor_errors.runtime(f"Region {index} must have a unique string ID"))
+                return Err(EditorError(f"Region {index} must have a unique string ID"))
             ids[region_id] = index - 1
         if parent_id is not None and (
             not isinstance(parent_id, str) or not parent_id or len(parent_id) > MAX_TEXT_LENGTH
         ):
-            return Err(editor_errors.runtime(f"Region {index} parent must be a region ID"))
+            return Err(EditorError(f"Region {index} parent must be a region ID"))
         region_ids.append(region_id)
         parents.append(parent_id)
         if (kind != "obj" and kind != "text") or (item.get("bbox") is not None and bbox is None):
-            return Err(editor_errors.runtime(f"Region {index} has an invalid type or normalized yxyx box"))
+            return Err(EditorError(f"Region {index} has an invalid type or normalized yxyx box"))
         if label is not None and (not isinstance(label, str) or not label.strip() or len(label) > MAX_TEXT_LENGTH):
-            return Err(editor_errors.runtime(f"Region {index} label must be a nonempty string"))
+            return Err(EditorError(f"Region {index} label must be a nonempty string"))
         if not isinstance(caption, str) or not isinstance(text, str):
-            return Err(editor_errors.runtime(f"Region {index} caption and text must be strings"))
+            return Err(EditorError(f"Region {index} caption and text must be strings"))
         if max(len(caption), len(text)) > MAX_TEXT_LENGTH or not valid_palette(item.get("color_palette", []), 5):
-            return Err(editor_errors.runtime(f"Region {index} has oversized text or an invalid palette"))
+            return Err(EditorError(f"Region {index} has oversized text or an invalid palette"))
         regions.append(
             LayoutRegion(
                 "text" if kind == "text" else "obj",
@@ -226,7 +226,7 @@ def read_regions(value: object) -> Result[list[LayoutRegion], AppError]:
     children: dict[str | None, list[int]] = {}
     for index, parent_id in enumerate(parents):
         if parent_id is not None and parent_id not in ids:
-            return Err(editor_errors.runtime(f"Region {index + 1} parent does not exist"))
+            return Err(EditorError(f"Region {index + 1} parent does not exist"))
         children.setdefault(parent_id, []).append(index)
     # Compile the editor-only hierarchy to a native, parent-first flat list.
     ordered: list[LayoutRegion] = []
@@ -238,7 +238,7 @@ def read_regions(value: object) -> Result[list[LayoutRegion], AppError]:
         if region_id is not None:
             stack.extend(reversed(children.get(region_id, [])))
     if len(ordered) != len(regions):
-        return Err(editor_errors.runtime("Region parents cannot form a cycle"))
+        return Err(EditorError("Region parents cannot form a cycle"))
     return Ok(ordered)
 
 
@@ -258,23 +258,23 @@ def centralized_bbox(bbox: BBox, width: int, height: int) -> BBox:
     return y0 - height / 2, x0 - width / 2, y1 - height / 2, x1 - width / 2
 
 
-def import_pixel_bboxes(value: object, width: int, height: int) -> Result[list[LayoutRegion], AppError]:
+def import_pixel_bboxes(value: object, width: int, height: int) -> Result[list[LayoutRegion], EditorError]:
     if not isinstance(value, list | tuple) or len(value) > MAX_REGIONS:
-        return Err(editor_errors.runtime("BBOX input must be a list of [x, y, width, height] pixel boxes"))
+        return Err(EditorError("BBOX input must be a list of [x, y, width, height] pixel boxes"))
     regions: list[LayoutRegion] = []
     for index, item in enumerate(value, 1):
         # Validate xywh numbers before converting to ordered yxyx edges.
         if not isinstance(item, list | tuple) or len(item) != 4:
-            return Err(editor_errors.runtime(f"BBOX input {index} must contain four numbers"))
+            return Err(EditorError(f"BBOX input {index} must contain four numbers"))
         numbers: list[float] = []
         for number in item:
             parsed_number = finite_number(number)
             if parsed_number is None:
-                return Err(editor_errors.runtime(f"BBOX input {index} must contain finite numbers"))
+                return Err(EditorError(f"BBOX input {index} must contain finite numbers"))
             numbers.append(parsed_number)
         x, y, w, h = numbers
         if w < 0 or h < 0:
-            return Err(editor_errors.runtime(f"BBOX input {index} width and height cannot be negative"))
+            return Err(EditorError(f"BBOX input {index} width and height cannot be negative"))
         bbox = ((y / height * 1000), (x / width * 1000), ((y + h) / height * 1000), ((x + w) / width * 1000))
         regions.append(LayoutRegion("obj", clamp_bbox(bbox), f"Region imported from BBOX input {index}."))
     return Ok(regions)
@@ -299,7 +299,7 @@ def resolve_layout(
     height: int | None,
     reference_image: torch.Tensor | None,
     override_image: bool,
-) -> Result[EditorLayout, AppError]:
+) -> Result[EditorLayout, EditorError]:
     parsed = parse_state(state_json)
     if isinstance(parsed, Err):
         return parsed
@@ -309,12 +309,12 @@ def resolve_layout(
     image = reference_image if override_image else None
     if image is not None:
         if image.ndim != 4 or image.shape[0] < 1 or image.shape[3] not in (3, 4):
-            return Err(editor_errors.runtime("Reference image must have shape [B, H, W, 3 or 4]"))
+            return Err(EditorError("Reference image must have shape [B, H, W, 3 or 4]"))
         h, w = image.shape[1:3]
     if isinstance(w, bool) or isinstance(h, bool) or not isinstance(w, int) or not isinstance(h, int):
-        return Err(editor_errors.runtime("Canvas width and height must be integers"))
+        return Err(EditorError("Canvas width and height must be integers"))
     if w < 1 or h < 1:
-        return Err(editor_errors.runtime("Canvas width and height must be positive integers"))
+        return Err(EditorError("Canvas width and height must be positive integers"))
     budget = image_budget(w, h, image.shape[0] if image is not None else 1)
     if isinstance(budget, Err):
         return Err(budget.error)
@@ -386,8 +386,8 @@ def prepare_layout(
     bboxes: object,
     override_bboxes: bool,
     import_json: str,
-    importer: Callable[[EditorLayout, str], Result[EditorLayout, AppError]],
-) -> Result[EditorLayout, AppError]:
+    importer: Callable[[EditorLayout, str], Result[EditorLayout, EditorError]],
+) -> Result[EditorLayout, EditorError]:
     resolved = resolve_layout(state_json, width, height, reference_image, override_image)
     if isinstance(resolved, Err):
         return resolved
@@ -403,7 +403,7 @@ def prepare_layout(
             return boxes
         layout = replace(layout, regions=[*layout.regions, *boxes.value])
     if len(layout.regions) > MAX_REGIONS:
-        return Err(editor_errors.runtime(f"Layouts support at most {MAX_REGIONS} regions"))
+        return Err(EditorError(f"Layouts support at most {MAX_REGIONS} regions"))
     return Ok(layout)
 
 
@@ -437,17 +437,17 @@ def pil_to_tensor(image: Image.Image) -> torch.Tensor:
     return data.reshape(1, image.height, image.width, 3).to(dtype=torch.float32) / 255.0
 
 
-def clean_image(layout: EditorLayout) -> Result[torch.Tensor, AppError]:
+def clean_image(layout: EditorLayout) -> Result[torch.Tensor, EditorError]:
     if layout.reference_image is not None:
         return Ok(layout.reference_image)
     value = layout.state.get("reference_image_path")
     path = reference_image_path(value)
     if value and path is None:
-        return Err(editor_errors.runtime("Invalid saved reference image path"))
+        return Err(EditorError("Invalid saved reference image path"))
     if path is not None:
         fit = layout.state.get("reference_image_fit")
         if fit not in ("stretch", "contain"):
-            return Err(editor_errors.runtime("Reference image fit must be stretch or contain"))
+            return Err(EditorError("Reference image fit must be stretch or contain"))
         try:
             with Image.open(path) as image:
                 budget = image_budget(image.width, image.height)
@@ -461,8 +461,8 @@ def clean_image(layout: EditorLayout) -> Result[torch.Tensor, AppError]:
                     else rgb.resize(size, Image.Resampling.LANCZOS)
                 )
                 return Ok(pil_to_tensor(fitted))
-        except (OSError, Image.DecompressionBombError) as error:
-            return Err(editor_errors.runtime("Could not open saved reference image", cause=error))
+        except (OSError, Image.DecompressionBombError):
+            return Err(EditorError("Could not open saved reference image"))
     image = torch.full((1, layout.height, layout.width, 3), 0.105, dtype=torch.float32)
     image[:, ::64, :, :] = 0.18
     image[:, :, ::64, :] = 0.18
@@ -507,13 +507,11 @@ def layout_output(layout: EditorLayout, prompt: dict[str, object]) -> io.NodeOut
     )
 
 
-prompt_server = getattr(PromptServer, "instance")  # noqa: B009 - dynamically exposed by Comfy.
-routes = getattr(prompt_server, "routes")  # noqa: B009
 register_ui_settings_routes(routes)
 _reference_image_jobs = asyncio.Semaphore(2)
 
 
-def store_reference_image(content: bytes, filename: str) -> Result[dict[str, object], AppError]:
+def store_reference_image(content: bytes, filename: str) -> Result[dict[str, object], EditorError]:
     name = re.sub(r"[^A-Za-z0-9_.-]+", "_", Path(filename).stem).strip("._")[:80] or "reference"
     relative = REFERENCE_IMAGE_DIR / f"{uuid.uuid4().hex}_{name}.png"
     path = Path(folder_paths.get_input_directory()) / relative
@@ -522,15 +520,19 @@ def store_reference_image(content: bytes, filename: str) -> Result[dict[str, obj
             budget = image_budget(source.width, source.height)
             if isinstance(budget, Err):
                 return Err(budget.error)
-            with source.convert("RGB") as image:
-                path.parent.mkdir(parents=True, exist_ok=True)
-                with TemporaryDirectory(prefix=".reference-", dir=path.parent) as directory:
-                    temporary = Path(directory) / path.name
-                    image.save(temporary)
-                    temporary.replace(path)
-                return Ok({"path": relative.as_posix(), "name": filename, "width": image.width, "height": image.height})
-    except (OSError, Image.DecompressionBombError, ValueError) as error:
-        return Err(editor_errors.runtime("Could not decode or save reference image", cause=error))
+            image = source.convert("RGB")
+    except (OSError, Image.DecompressionBombError, ValueError):
+        return Err(EditorError("Could not decode reference image"))
+    with image:
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with TemporaryDirectory(prefix=".reference-", dir=path.parent) as directory:
+                temporary = Path(directory) / path.name
+                image.save(temporary)
+                temporary.replace(path)
+        except OSError:
+            return Err(EditorError("Could not save reference image", status=500))
+        return Ok({"path": relative.as_posix(), "name": filename, "width": image.width, "height": image.height})
 
 
 @routes.post("/neriss_comfynodes/editor/reference_image")
@@ -557,7 +559,7 @@ async def upload_reference_image(request: web.Request) -> web.Response:
     async with _reference_image_jobs:
         result = await asyncio.to_thread(store_reference_image, bytes(content), field.filename)
     if isinstance(result, Err):
-        return web.json_response({"error": str(result.error)}, status=400)
+        return store_response(result, 400)
     return web.json_response(result.value)
 
 

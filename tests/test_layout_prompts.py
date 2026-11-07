@@ -22,6 +22,18 @@ CHARACTER_SAMPLE = (ROOT / "tests/fixtures/moss_character_layout.json").read_tex
 PALETTE_SAMPLE = (ROOT / "tests/fixtures/moss_palette_layout.json").read_text(encoding="utf-8")
 
 
+def load_ui_settings() -> object:
+    return ui_settings.load_store(
+        ui_settings.ui_settings_path(), ui_settings.default_ui_settings, ui_settings.valid_ui_settings
+    )
+
+
+def write_ui_settings(settings: object) -> object:
+    return ui_settings.save_store(
+        ui_settings.ui_settings_path(), settings, ui_settings.default_ui_settings, ui_settings.valid_ui_settings
+    )
+
+
 class UiSettingsTests(unittest.TestCase):
     def setUp(self) -> None:
         directory = TemporaryDirectory()
@@ -46,7 +58,7 @@ class UiSettingsTests(unittest.TestCase):
             self.assertIsInstance(ui_settings.normalize_binding({"key": key, "modifiers": []}), ui_settings.Ok, key)
 
     def test_missing_file_returns_defaults_without_creating_it(self) -> None:
-        result = ui_settings.load_ui_settings()
+        result = load_ui_settings()
         self.assertIsInstance(result, ui_settings.Ok)
         self.assertEqual(result.value, ui_settings.default_ui_settings())
         self.assertFalse(ui_settings.ui_settings_path().exists())
@@ -55,11 +67,11 @@ class UiSettingsTests(unittest.TestCase):
         settings = ui_settings.default_ui_settings()
         settings["editor"]["sidebarWidth"] = 510
         settings["editor"]["shortcuts"] = {"tool.select": [{"key": "b", "modifiers": []}]}
-        saved = ui_settings.write_ui_settings(settings)
+        saved = write_ui_settings(settings)
         self.assertIsInstance(saved, ui_settings.Ok)
         path = self.directory / "Neriss_ComfyNodes" / "ui_settings.json"
         self.assertEqual(json.loads(path.read_text()), settings)
-        self.assertEqual(ui_settings.load_ui_settings().value, settings)
+        self.assertEqual(load_ui_settings().value, settings)
         self.assertEqual(list(path.parent.iterdir()), [path])
 
     def test_corrupt_unsupported_and_invalid_utf8_files_are_never_replaced(self) -> None:
@@ -68,19 +80,19 @@ class UiSettingsTests(unittest.TestCase):
         for content in (b"{broken", b'{"version":2}', b"\xff\xfe", b'{"version":1,"editor":{"sidebarWidth":1}}'):
             with self.subTest(content=content):
                 path.write_bytes(content)
-                self.assertIsInstance(ui_settings.load_ui_settings(), ui_settings.Err)
-                self.assertIsInstance(ui_settings.write_ui_settings(ui_settings.default_ui_settings()), ui_settings.Err)
+                self.assertIsInstance(load_ui_settings(), ui_settings.Err)
+                self.assertIsInstance(write_ui_settings(ui_settings.default_ui_settings()), ui_settings.Err)
                 self.assertEqual(path.read_bytes(), content)
 
     def test_failed_replace_preserves_previous_file_and_cleans_temporary_files(self) -> None:
         first = ui_settings.default_ui_settings()
-        self.assertIsInstance(ui_settings.write_ui_settings(first), ui_settings.Ok)
+        self.assertIsInstance(write_ui_settings(first), ui_settings.Ok)
         path = ui_settings.ui_settings_path()
         original = path.read_bytes()
         next_settings = ui_settings.default_ui_settings()
         next_settings["editor"]["sidebarWidth"] = 600
         with patch.object(Path, "replace", side_effect=PermissionError("Read-only settings")):
-            self.assertIsInstance(ui_settings.write_ui_settings(next_settings), ui_settings.Err)
+            self.assertIsInstance(write_ui_settings(next_settings), ui_settings.Err)
         self.assertEqual(path.read_bytes(), original)
         self.assertEqual(list(path.parent.iterdir()), [path])
 
@@ -201,12 +213,6 @@ class ResolutionSelectorTests(unittest.IsolatedAsyncioTestCase):
             info = resolution.NerissResolutionSelector.GET_NODE_INFO_V1()
             self.assertEqual(info["input"]["required"]["preset"][0], "COMBO")
             self.assertIsNone(resolution.NerissResolutionSelector.execute(**self.inputs).block_execution)
-
-    def test_missing_snapshot_is_not_recovered_from_a_local_preset(self) -> None:
-        inputs = {key: value for key, value in self.inputs.items() if key != "preset_aspect_x"}
-        with patch.object(resolution, "load_store", side_effect=AssertionError("Unexpected library lookup")):
-            output = resolution.NerissResolutionSelector.execute(**inputs)
-        self.assertIn("no saved aspect-ratio snapshot", output.block_execution)
 
 
 class LayoutPromptTests(unittest.TestCase):

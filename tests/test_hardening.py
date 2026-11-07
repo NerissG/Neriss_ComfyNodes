@@ -221,14 +221,14 @@ class ReferenceRouteTests(unittest.IsolatedAsyncioTestCase):
     async def test_invalid_bomb_and_failed_save_leave_no_reference_files(self) -> None:
         response = await self.client.post(self.endpoint, data=image_upload(b"not an image"))
         self.assertEqual(response.status, 400)
-        for target, name, failure in (
-            (Image, "open", Image.DecompressionBombError("Oversized image")),
-            (Image.Image, "save", OSError(errno.ENOSPC, "Disk full")),
+        for target, name, failure, status in (
+            (Image, "open", Image.DecompressionBombError("Oversized image"), 400),
+            (Image.Image, "save", OSError(errno.ENOSPC, "Disk full"), 500),
         ):
             content = png_bytes()
             with self.subTest(operation=name), patch.object(target, name, side_effect=failure):
                 response = await self.client.post(self.endpoint, data=image_upload(content))
-                self.assertEqual(response.status, 400)
+                self.assertEqual(response.status, status)
             self.assertEqual(list(self.root.rglob("*.png")), [])
             self.assertFalse(any(path.name.startswith(".reference-") for path in self.root.rglob("*")))
 

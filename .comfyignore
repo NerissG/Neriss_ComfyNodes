@@ -4,6 +4,7 @@ AGENTS.md
 flake.nix
 flake.lock
 tests/
+documentation/
 web/e2e/
 web/preview/
 web/tests/

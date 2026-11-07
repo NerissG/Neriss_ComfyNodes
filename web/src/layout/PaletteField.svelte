@@ -158,7 +158,7 @@
         class="color-swatch"
         class:active={active === index}
         style={`--swatch: ${active === index ? draft : color}`}
-        title={`${color} — right-click or Delete to remove`}
+        title={`${color} - right-click or Delete to remove`}
         aria-label={`${label} color ${index + 1}: ${color}`}
         aria-expanded={active === index}
         onclick={() => (active === index ? close(true) : open(index, color))}
@@ -284,7 +284,7 @@
                 type="button"
                 class="library-swatch"
                 style={`--swatch: ${color}`}
-                title={`${color} — right-click to unfavorite`}
+                title={`${color} - right-click to unfavorite`}
                 aria-label={`Use favorite color ${color}`}
                 onclick={() => commit(color)}
                 oncontextmenu={(event) => {

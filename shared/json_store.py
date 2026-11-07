@@ -13,7 +13,7 @@ from typing import TypeVar
 
 from aiohttp import web
 
-from . import EditorError, Err, Ok, Result, editor_errors
+from . import EditorError, Err, Ok, Result
 from .limits import MAX_JSON_BYTES
 
 T = TypeVar("T")
@@ -31,10 +31,10 @@ def parse_json(content: str | bytes) -> Result[object, EditorError]:
             len(content) > MAX_JSON_BYTES
             or len(content.encode("utf-8") if isinstance(content, str) else content) > MAX_JSON_BYTES
         ):
-            return Err(editor_errors.runtime("JSON exceeds the 2 MiB limit", {"status": 413}))
+            return Err(EditorError("JSON exceeds the 2 MiB limit", status=413))
         return Ok(json.loads(content))
-    except (ValueError, UnicodeError, RecursionError) as error:
-        return Err(editor_errors.runtime("Invalid or excessively nested JSON", {"status": 400}, error))
+    except (ValueError, UnicodeError, RecursionError):
+        return Err(EditorError("Invalid or excessively nested JSON", status=400))
 
 
 async def request_json(request: web.Request) -> Result[object, EditorError]:
@@ -42,7 +42,7 @@ async def request_json(request: web.Request) -> Result[object, EditorError]:
     async for chunk in request.content.iter_chunked(64 * 1024):
         content.extend(chunk)
         if len(content) > MAX_JSON_BYTES:
-            return Err(editor_errors.runtime("JSON exceeds the 2 MiB limit", {"status": 413}))
+            return Err(EditorError("JSON exceeds the 2 MiB limit", status=413))
     return parse_json(bytes(content))
 
 
@@ -52,14 +52,14 @@ def load_store(path: Path, default: Callable[[], T], validate: Callable[[object]
             content = file.read(MAX_JSON_BYTES + 1)
     except FileNotFoundError:
         return Ok(default())
-    except OSError as error:
-        return Err(editor_errors.runtime(f"Could not read {path.name}; file has not been replaced", cause=error))
+    except OSError:
+        return Err(EditorError(f"Could not read {path.name}; file has not been replaced"))
     parsed = parse_json(content)
     if isinstance(parsed, Err):
-        return Err(editor_errors.runtime(f"{path.name} is unreadable; file has not been replaced", cause=parsed.error))
+        return Err(EditorError(f"{path.name} is unreadable; file has not been replaced"))
     value = validate(parsed.value)
     if value is None:
-        return Err(editor_errors.runtime(f"{path.name} is invalid; file has not been replaced"))
+        return Err(EditorError(f"{path.name} is invalid; file has not been replaced"))
     return Ok(value)
 
 
@@ -72,17 +72,17 @@ def save_store(
 ) -> Result[T, EditorError]:
     validated = validate(value)
     if validated is None:
-        return Err(editor_errors.runtime("Invalid stored JSON payload", {"status": 400}))
+        return Err(EditorError("Invalid stored JSON payload", status=400))
     with _write_lock:
         previous = load_store(path, default, validate)
         if isinstance(previous, Err):
             return previous
         if expected is not None and expected != revision(previous.value):
-            return Err(editor_errors.runtime("Library changed in another tab; reload before saving", {"status": 409}))
+            return Err(EditorError(f"{path.name} changed in another tab; reload before saving", status=409))
         try:
             content = json.dumps(validated, indent=2, ensure_ascii=False, allow_nan=False) + "\n"
             if len(content.encode("utf-8")) > MAX_JSON_BYTES:
-                return Err(editor_errors.runtime("JSON exceeds the 2 MiB limit", {"status": 413}))
+                return Err(EditorError("JSON exceeds the 2 MiB limit", status=413))
             path.parent.mkdir(parents=True, exist_ok=True)
             with TemporaryDirectory(prefix=".neriss-json-", dir=path.parent) as directory:
                 temporary = Path(directory) / path.name
@@ -91,15 +91,12 @@ def save_store(
                     file.flush()
                     os.fsync(file.fileno())
                 temporary.replace(path)
-        except (OSError, ValueError, UnicodeError) as error:
-            return Err(editor_errors.runtime(f"Could not save {path.name}; previous file retained", cause=error))
+        except (OSError, ValueError, UnicodeError):
+            return Err(EditorError(f"Could not save {path.name}; previous file retained"))
     return Ok(validated)
 
 
 def store_response(result: Result[T, EditorError], error_status: int = 500) -> web.Response:
     if isinstance(result, Err):
-        status = (result.error.details or {}).get("status", error_status)
-        return web.json_response(
-            {"error": str(result.error)}, status=status if isinstance(status, int) else error_status
-        )
+        return web.json_response({"error": str(result.error)}, status=result.error.status or error_status)
     return web.json_response(result.value, headers={"ETag": revision(result.value)})

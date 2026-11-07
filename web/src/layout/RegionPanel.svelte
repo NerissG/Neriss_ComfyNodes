@@ -307,7 +307,7 @@
             type="button"
             class="quiet region-icon"
             aria-label={region.bbox ? `Zoom to region ${index + 1}` : `Draw box for region ${index + 1}`}
-            title={region.bbox ? "Zoom to region" : "No box yet — draw on canvas"}
+            title={region.bbox ? "Zoom to region" : "No box yet - draw on canvas"}
             onclick={() => (region.bbox ? zoomTo(region) : onredraw(region.id))}
           >
             {#if region.bbox}<svg viewBox="0 0 16 16" aria-hidden="true"

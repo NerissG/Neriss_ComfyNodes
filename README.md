@@ -2,103 +2,173 @@
 
 ## Install
 
-Use a current ComfyUI installation with the V3 `comfy_api` API.
+**ComfyUI Manager:**
+1. Open `Manager` -> `Custom Nodes Manager`.
+2. Search for `Neriss ComfyNodes`. 
+3. Install it.
+4. then restart ComfyUI and refresh the browser.
+
+**comfy-cli:**
+
+```sh
+comfy node install <registry-node-id>
+```
+
+**Manual:**
+
+With manual install, you will need to pull the repo to update the nodepack.
 
 ```sh
 cd /path/to/ComfyUI/custom_nodes
-git clone https://github.com/NerissG/Neriss_ComfyNodes.git Neriss_ComfyNodes
+git clone https://github.com/NerissG/Neriss_ComfyNodes.git
 ```
 
-Restart ComfyUI and refresh the browser. The frontend is prebuilt; you do not need Node.js, pnpm or Nix to use the nodes.
-
-To update, run `git pull --ff-only` inside `Neriss_ComfyNodes`, then restart and refresh again.
+The frontend is prebuilt. You do not need Node.js, pnpm or Nix.
+Restart ComfyUI and refresh the browser.
 
 ## Nodes
 
-- **🔨 Ideogram 4 Prompt Editor** — draw object and text regions, describe the scene, and export an Ideogram 4 structured JSON prompt. Supports reference images, palettes and style presets.
-- **🔨 MOSS Layout Prompt Editor** — the same visual editor for experimental MOSS-Image-Base layout prompts, with object, character and text regions. Every region needs a bounding box before export.
-- **🔨 Resolution Selector** — calculate width and height from an aspect-ratio preset or custom ratio, using a megapixel target or square-side target. Supports flipping and rounding to a chosen multiple.
-- **🔨 Scale Image to Megapixels** — resize an image batch to a megapixel or square-side target, with selectable interpolation, optional cropping and mask resizing.
-- **🔨 LoRA Block Strength Editor** — load a safetensors LoRA with a compact block grid, discovered block families, block/module multipliers, and separate global MODEL/CLIP strengths. No fixed model-family block layouts.
+### 🔨 Ideogram 4 Prompt Editor
 
-On either prompt node, click **Open Layout Editor**. Connect `json_prompt` to your model's prompt input and use the node's `width` and `height` for generation. Both editors also output a reference/grid image, an annotated preview and pixel bounding boxes.
+> A visual layout editor that builds Ideogram 4 structured JSON prompts.
+>
+> <details>
+> <summary>ℹ️ <i>See More Information</i></summary>
+>
+> - Click **Open Layout Editor**, draw regions on the canvas, then describe the scene and each region.
+> - Reusable style presets and an optional reference image to trace over.
+> - Connect `json_prompt` to your model's prompt input and use the node's `width` and `height` to create the latent.
+> - Also outputs a reference/grid image, an annotated preview and pixel bounding boxes.
+> - Paste an existing prompt with **Import JSON** to edit it visually, or connect one to `import_json` to apply it on execution.
+>
+> ![IG4 Layout Node](assets/readme/IG4_Layout_Node.png)
+> ![IG4 Layout GUI](assets/readme/IG4_Layout_GUI.png)
+> </details>
 
-### LoRA block strengths
+### 🔨 MOSS Layout Prompt Editor
 
-Connect a MODEL and optionally CLIP to **LoRA Block Strength Editor**, select an installed `.safetensors` LoRA, then click **Open Strength Editor**. The header dropdown also selects a LoRA; each file keeps a separate draft while the editor is open, and the node's selection changes only when you apply. Filter the grid by block family or search modules, adjust multipliers, and click **Apply strengths**. Click a block's name to edit its modules. Use the node's MODEL/CLIP outputs instead of an additional loader for the same LoRA.
+> The same visual editor, for MOSS-Image layout prompts.
+>
+> <details>
+> <summary>ℹ️ <i>See More Information</i></summary>
+>
+> - Click **Open Layout Editor** to draw regions.
+> - Add and sort the summary tags alongside the scene caption.
+> - Connect `json_prompt` to your model's prompt input and use the node's `width` and `height` to create the latent.
+> - Also outputs a reference/grid image, an annotated preview and pixel bounding boxes.
+> - Paste an existing prompt with **Import JSON** to edit it visually, or connect one to `import_json` to apply it on execution.
+>
+> ![MOSS Layout Node](assets/readme/MOSS_Layout_Node.png)
+> ![MOSS Layout GUI](assets/readme/MOSS_Layout_GUI.png)
+> </details>
 
-Click the LoRA picker and type filename or folder terms (for example `anima style gpt`). Results match all terms in any order, show folders separately, and remain responsive for large libraries. Arrow keys navigate, Enter selects, and Escape closes the picker without closing the editor.
+### 🔨 Resolution Selector
 
-- A target's effective patch strength is its MODEL/CLIP global strength times its most specific multiplier. A module override replaces its parent multiplier; unedited targets inherit their parent or `1`. Zero skips a patch; negative values are allowed. The ↺ control restores inheritance.
-- Use **Changed** to show edited blocks. Select blocks to set their multipliers together; module overrides remain intact. **Reset selected** clears block and module overrides in the selection. Numeric ± buttons step by `0.05`; arrow keys support Shift (`0.1`) and Alt (`0.01`).
-- Changes are drafts until applied. The workflow stores multipliers and the LoRA selection; switching files with active overrides requires an explicit reset. Renaming/replacing a file does not guarantee its old target rules still apply.
-- The editor reads safetensors headers without loading weights or the connected model. Actual target resolution uses ComfyUI's LoRA mappings and patch loader at execution, including supported text-encoder targets. An incompatible LoRA cannot be made compatible by changing its strengths.
-- The `report` output is JSON with resolved/applied patch counts, unmatched targets, unused overrides, and unrecognized keys. Inspect it when trying a new model/adapter format. Targets missing from an omitted CLIP are reported as unmatched.
-- This first version handles recognized LoRA/DoRA, LyCORIS adapter suffixes and additive diff patches through ComfyUI. Format recognition is not a guarantee that every adapter variant or quantized model works. Weight-replacement and configuration adapters are explicitly rejected; use ComfyUI's standard loader for those. Preset libraries and architecture-specific labels are not included yet.
+> Pick a generation size from an aspect ratio and a pixel budget.
+>
+> <details>
+> <summary>ℹ️ <i>See More Information</i></summary>
+>
+> - Choose an aspect-ratio preset or enter a custom ratio, and **flip** it to swap portrait and landscape.
+> - Size by total **megapixels** or by a **squared** side length.
+> - Width and height are rounded to the chosen **multiple** (16 by default).
+> - Presets are editable and shared across workflows.
+>
+> ![Resolution_Selector_Node](assets/readme/Resolution_Selector_Node.png)
+> </details>
+
+### 🔨 Scale Image to Megapixels
+
+> Resize an image batch to a megapixel or square-side target.
+>
+> <details>
+> <summary>ℹ️ <i>See More Information</i></summary>
+>
+> - Same sizing modes as the Resolution Selector, with output sides rounded to `resolution_steps`.
+> - Choose the interpolation: nearest-exact, bilinear, area, bicubic or lanczos.
+> - **stretch** resizes directly; **crop** trims to the target aspect first, anchored at the center or an edge.
+> - An optional mask is cropped and resized with the image. Without one, an empty mask is returned.
+> - Outputs the image, its `width` and `height`, and the mask.
+>
+> ![Rescale_Image_Node](assets/readme/Rescale_Image_Node.png)
+> </details>
+
+### 🔨 LoRA Block Strength Editor
+
+> Load a LoRA and set strengths per block or per module, for any model family.
+>
+> <details>
+> <summary>ℹ️ <i>See More Information</i></summary>
+>
+> - Connect a MODEL (and optionally a TE), pick a LoRA, then click **Open Strength Editor**.
+> - Blocks are read from the LoRA itself, so it works with any model family.
+> - Each multiplier scales the global MODEL/TE strength. `0` turns a block off; negative values are allowed.
+> - Changes take effect when you click **Apply strengths**.
+> - If a LoRA doesn't seem to apply, check the `report` output.
+>
+> ![LoRA Strength Node](assets/readme/LoRA_Strength_Node.png)
+> ![LoRA Strength GUI](assets/readme/LoRA_Strength_GUI.png)
+> </details>
 
 ## Development
 
-Keep the checkout under `ComfyUI/custom_nodes`. Use ComfyUI's Python environment, Node.js 24 and pnpm 12.9.0. On Linux, `nix develop path:.` supplies the frontend/browser tools only; it does not activate or modify your Python environment.
+Clone the repository into `ComfyUI/custom_nodes`. You need Node.js 24 and pnpm; `corepack enable` installs the pinned pnpm version.
 
-Install the development dependencies and start Vite:
+Install the Python check tools into the environment you run ComfyUI with:
 
 ```sh
-# From this directory, activate ComfyUI's Python environment first:
-source ../../.venv/bin/activate
 python -m pip install ruff ty
+```
+
+Start Vite from `web/`:
+
+```sh
 cd web
 pnpm install --frozen-lockfile
 pnpm dev
 ```
 
-In another terminal, start ComfyUI from its own directory:
+Then start ComfyUI with `WEB_DEV=1` so it loads the frontend from Vite:
 
 ```sh
 WEB_DEV=1 python main.py
 ```
 
-Open <http://127.0.0.1:8188>. Frontend edits hot-reload from Vite on port 5173; Python changes require a ComfyUI restart. If you use a different browser URL, set it when starting Vite, for example `COMFY_ORIGIN=http://localhost:8188 pnpm dev`.
+Frontend edits hot-reload; Python changes need a ComfyUI restart. If ComfyUI isn't at `http://127.0.0.1:8188`, pass its URL to Vite, for example `COMFY_ORIGIN=http://localhost:8000 pnpm dev`.
 
-For standalone UI work, run `pnpm run preview:editor` from `web/` and open <http://127.0.0.1:4179/preview/index.html>. This uses a mock node; uploads and saved libraries need ComfyUI or test mocks.
+To work on the editor without ComfyUI, run `pnpm run preview:editor` and open <http://127.0.0.1:4179/preview/index.html>. It uses a mock node, so uploads and saved libraries don't work there.
 
 ### Checks
 
-From the repository root, using ComfyUI's Python:
+Python, from the repository root:
 
 ```sh
 python -m ruff format .
 python -m ruff check .
 python -m ty check
-python -m unittest discover -s tests -v
+python -m unittest discover -s tests
 ```
 
-From `web/`:
+Frontend, from `web/`:
 
 ```sh
 pnpm run lint
 pnpm run typecheck
-pnpm run test
-pnpm run build
-pnpm run check:release
+pnpm test
 ```
 
-For editor interaction changes, also run `pnpm run test:e2e`. It enters the pinned Nix browser environment automatically; Nix must be installed. Use `pnpm run test:e2e --preflight` to check that environment without running the full suite.
+Browser tests run with `pnpm run test:e2e` and need [Nix](https://nixos.org/download/) installed (until I stop being lazy and make it less rigid).
 
-CI runs the frontend checks, Python checks/tests against a pinned real ComfyUI checkout on CPU, and browser tests using this repository's pinned Nix Chromium. The registry publishing workflow requires those checks to pass. This is a regression baseline, not a broader Python/platform support guarantee.
+### Building
 
-### Production builds
+The built frontend in `web/dist` is committed, so users don't need Node.js. After frontend changes, run `pnpm run build` from `web/` and commit `web/dist` and `THIRD_PARTY_NOTICES.md` with your changes. CI fails if they are out of date.
 
-Run `pnpm run build` from `web/` and commit the updated `web/dist` files and root `THIRD_PARTY_NOTICES.md` with your source changes. The build regenerates dependency notices in both locations; deleting `dist` does not delete the root copy. `pnpm run check:release` and CI reject missing or stale output/notices without rewriting them.
+### Releasing
 
-Restart ComfyUI **without** `WEB_DEV=1` to use the production build.
+1. Bump the version from `web/` with `pnpm run version:bump patch` (or `minor`, `major`, or an exact version).
+2. Commit the changes and push a matching `vX.Y.Z` tag.
+3. Run the **Publish tagged registry release** workflow on that tag.
 
-### Release versions
+## License
 
-From `web/`, run `pnpm run version:bump patch` (or `minor`, `major`, or an explicit
-version such as `0.2.0`). The command updates `pyproject.toml`, `uv.lock` and
-`web/package.json` together without committing, tagging or publishing. Versions
-must be plain `X.Y.Z` releases and must increase. Release checks reject metadata
-that has drifted out of sync. Review and stage all three files, then use a matching
-`vX.Y.Z` tag when ready to publish.
-
-Licensed under [MPL-2.0](LICENSE). Bundled dependency licenses are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Distribute the editable source and both license/notice files with releases.
+[MPL-2.0](LICENSE). Licenses for bundled frontend dependencies are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
