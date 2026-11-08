@@ -456,7 +456,8 @@ class LayoutPromptTests(unittest.TestCase):
         prompt, pretty, image, preview, width, height, boxes = output.result
         self.assertEqual(json.loads(prompt), json.loads(SAMPLE))
         self.assertEqual(json.loads(pretty), json.loads(prompt))
-        self.assertIn('"bbox": [-416.0, -384.0, -288.0, 384.0]', pretty)
+        self.assertIn('"bbox":[-416,-384,-288,384]', prompt)
+        self.assertIn('"bbox": [-416, -384, -288, 384]', pretty)
         self.assertEqual((width, height), (1024, 1024))
         self.assertEqual(boxes, [(128, 96, 768, 128), (224, 320, 576, 576)])
         self.assertEqual(tuple(image.shape), (1, height, width, 3))
@@ -471,12 +472,38 @@ class LayoutPromptTests(unittest.TestCase):
                     state_json=json.dumps(state), width=width, height=height
                 )
                 prompt = json.loads(output.result[0])
-                self.assertEqual(prompt["items"][0]["bbox"], [-height / 2, -width / 2, height / 2, width / 2])
+                self.assertEqual(
+                    prompt["items"][0]["bbox"],
+                    [-(height // 2), -(width // 2), height - height // 2, width - width // 2],
+                )
                 self.assertEqual(output.result[6], [(0, 0, width, height)])
                 roundtrip = moss.NerissMossLayoutPromptEditor.execute(
                     import_json=output.result[0], width=width, height=height
                 )
                 self.assertEqual(json.loads(roundtrip.result[0]), prompt)
+                self.assertEqual(roundtrip.result[6], output.result[6])
+
+    def test_moss_coordinates_always_serialize_as_integers(self) -> None:
+        cases = (
+            (80, 120, [-60, -40, 60, 40]),
+            (81, 120, [-60, -40, 60, 41]),
+            (80, 121, [-60, -40, 61, 40]),
+            (81, 121, [-60, -40, 61, 41]),
+            (1, 3, [-1, 0, 2, 1]),
+        )
+        for width, height, expected in cases:
+            with self.subTest(width=width, height=height):
+                caption = "Version 1.0"
+                state = {"elements": [{"type": "obj", "desc": caption, "bbox": [0, 0, 1000, 1000]}]}
+                output = moss.NerissMossLayoutPromptEditor.execute(
+                    state_json=json.dumps(state), width=width, height=height
+                )
+                self.assertIsNone(output.block_execution)
+                for serialized in output.result[:2]:
+                    item = json.loads(serialized)["items"][0]
+                    self.assertEqual(item["caption"], caption)
+                    self.assertEqual(item["bbox"], expected)
+                    self.assertEqual([type(value) for value in item["bbox"]], [type(value) for value in expected])
 
     def test_pixel_boxes_do_not_lose_precision_at_high_resolution(self) -> None:
         output = moss.NerissMossLayoutPromptEditor.execute(

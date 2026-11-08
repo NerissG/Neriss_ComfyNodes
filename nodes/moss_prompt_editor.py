@@ -113,10 +113,10 @@ def import_moss_prompt(layout: EditorLayout, value: str) -> Result[EditorLayout,
             return Err(EditorError(f"MOSS item {index} palette must contain up to 5 hex colors"))
         y0, x0, y1, x1 = bbox
         normalized = (
-            (y0 + layout.height / 2) / layout.height * 1000,
-            (x0 + layout.width / 2) / layout.width * 1000,
-            (y1 + layout.height / 2) / layout.height * 1000,
-            (x1 + layout.width / 2) / layout.width * 1000,
+            (y0 + layout.height // 2) / layout.height * 1000,
+            (x0 + layout.width // 2) / layout.width * 1000,
+            (y1 + layout.height // 2) / layout.height * 1000,
+            (x1 + layout.width // 2) / layout.width * 1000,
         )
         regions.append(
             LayoutRegion(

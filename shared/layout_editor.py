@@ -253,9 +253,12 @@ def pixel_edges(bbox: BBox, width: int, height: int) -> PixelBBox:
     )
 
 
-def centralized_bbox(bbox: BBox, width: int, height: int) -> BBox:
+def centralized_bbox(bbox: BBox, width: int, height: int) -> PixelBBox:
     y0, x0, y1, x1 = pixel_edges(bbox, width, height)
-    return y0 - height / 2, x0 - width / 2, y1 - height / 2, x1 - width / 2
+    # Use an integer origin so odd canvases also export whole-pixel coordinates.
+    center_y = height // 2
+    center_x = width // 2
+    return y0 - center_y, x0 - center_x, y1 - center_y, x1 - center_x
 
 
 def import_pixel_bboxes(value: object, width: int, height: int) -> Result[list[LayoutRegion], EditorError]:

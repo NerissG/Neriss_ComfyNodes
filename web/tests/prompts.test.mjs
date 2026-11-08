@@ -154,20 +154,36 @@ test("canvas sides and megapixels have no fixed cap, while saved elements remain
   assert.deepEqual([resized.width, resized.height], [14142, 7071]);
 });
 
-test("centered boxes use the correct axis dimensions on rectangular and odd canvases", () => {
+test("centered boxes use integer coordinates on rectangular and odd canvases", () => {
   for (const [width, height] of [
     [1536, 768],
     [768, 1536],
     [1025, 769],
+    [1024, 769],
+    [1025, 768],
   ]) {
     assert.deepEqual(toCentralized([0, 0, 1000, 1000], width, height), [
-      -height / 2,
-      -width / 2,
-      height / 2,
-      width / 2,
+      -Math.floor(height / 2),
+      -Math.floor(width / 2),
+      Math.ceil(height / 2),
+      Math.ceil(width / 2),
     ]);
-    const box = [-height / 2 + 3, -width / 2 + 1, height / 2 - 7, width / 2 - 5];
+    const box = [
+      -Math.floor(height / 2) + 3,
+      -Math.floor(width / 2) + 1,
+      Math.ceil(height / 2) - 7,
+      Math.ceil(width / 2) - 5,
+    ];
     assert.deepEqual(toCentralized(fromCentralized(box, width, height), width, height), box);
+    let state = { ...createInitialState(), width, height };
+    const expected = { ...sample, items: [{ label: "object", caption: "Integer pixels", bbox: box }] };
+    for (let index = 0; index < 3; index++) {
+      const imported = importMossText(state, JSON.stringify(expected));
+      assert.equal(imported.isOk(), true);
+      state = imported.value;
+      assert.deepEqual(buildMossPrompt(state), expected);
+      assert.ok(buildMossPrompt(state).items[0].bbox.every(Number.isInteger));
+    }
   }
 });
 

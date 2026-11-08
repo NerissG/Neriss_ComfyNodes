@@ -44,22 +44,22 @@ export function resizeBbox(box: Bbox, handle: ResizeHandle, dx: number, dy: numb
   return clampBbox([y0, x0, y1, x1]);
 }
 
-// Round only at the pixel boundary, not in normalized editor space.
+// Round only at the pixel boundary, using an integer origin even on odd canvases.
 export function toCentralized(box: Bbox, width: number, height: number): Bbox {
   return [
-    Math.round((box[0] / 1000) * height) - height / 2,
-    Math.round((box[1] / 1000) * width) - width / 2,
-    Math.round((box[2] / 1000) * height) - height / 2,
-    Math.round((box[3] / 1000) * width) - width / 2,
+    Math.round((box[0] / 1000) * height) - Math.floor(height / 2),
+    Math.round((box[1] / 1000) * width) - Math.floor(width / 2),
+    Math.round((box[2] / 1000) * height) - Math.floor(height / 2),
+    Math.round((box[3] / 1000) * width) - Math.floor(width / 2),
   ];
 }
 
 export function fromCentralized(box: Bbox, width: number, height: number): Bbox {
   return [
-    ((box[0] + height / 2) / height) * 1000,
-    ((box[1] + width / 2) / width) * 1000,
-    ((box[2] + height / 2) / height) * 1000,
-    ((box[3] + width / 2) / width) * 1000,
+    ((box[0] + Math.floor(height / 2)) / height) * 1000,
+    ((box[1] + Math.floor(width / 2)) / width) * 1000,
+    ((box[2] + Math.floor(height / 2)) / height) * 1000,
+    ((box[3] + Math.floor(width / 2)) / width) * 1000,
   ];
 }
 

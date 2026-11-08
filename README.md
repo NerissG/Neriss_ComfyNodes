@@ -11,7 +11,7 @@
 **comfy-cli:**
 
 ```sh
-comfy node install <registry-node-id>
+comfy node install Neriss_ComfyNodes
 ```
 
 **Manual:**
