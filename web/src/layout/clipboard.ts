@@ -1,18 +1,6 @@
 import { ResultAsync, errAsync } from "neverthrow";
 import { editorErrors, type AppError } from "@/errors";
 
-export function readClipboardText(): ResultAsync<string, AppError> {
-  return ResultAsync.fromPromise(navigator.clipboard.readText(), (cause) =>
-    editorErrors.runtime("Could not read clipboard", undefined, cause),
-  );
-}
-
-export function writeClipboardText(text: string): ResultAsync<void, AppError> {
-  return ResultAsync.fromPromise(navigator.clipboard.writeText(text), (cause) =>
-    editorErrors.runtime("Could not write clipboard", undefined, cause),
-  );
-}
-
 export function readClipboardImage(): ResultAsync<File, AppError> {
   if (!navigator.clipboard.read)
     return errAsync(editorErrors.runtime("Clipboard image reading is not supported by this browser"));

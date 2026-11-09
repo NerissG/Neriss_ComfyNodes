@@ -352,6 +352,45 @@ test("selection mismatches, invalid state and inspection failures remain recover
   await expect(bar(modal, block0)).toBeVisible();
 });
 
+test("strength JSON copies to and pastes from the clipboard as one undo step", async ({ page }) => {
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.goto("/preview/index.html?lora=1");
+  const modal = page.getByRole("dialog", { name: "LoRA block strength editor" });
+  const paste = modal.getByRole("button", { name: "Paste strength JSON", exact: true });
+  await setBlock(modal, block0, "0.25");
+  await modal.getByRole("button", { name: "Copy strength JSON", exact: true }).click();
+  await expect(modal.getByText("Copied", { exact: true })).toBeVisible();
+  expect(JSON.parse(await page.evaluate(() => navigator.clipboard.readText()))).toEqual({
+    version: 1,
+    lora_name: "demo.safetensors",
+    overrides: { [block0]: 0.25 },
+  });
+  const overrides = { [block10]: 0.5, [`${block0}.attn.k`]: 0 };
+  const pasted = JSON.stringify({ version: 1, lora_name: "other.safetensors", overrides });
+  await page.evaluate((text) => navigator.clipboard.writeText(text), pasted);
+  await paste.click();
+  await expect(bar(modal, block10)).toHaveAttribute("aria-valuenow", "0.5");
+  await expect(bar(modal, block0)).toHaveAttribute("aria-valuenow", "1");
+  await expect(modal.getByText("Copied", { exact: true })).toHaveCount(0);
+  await modal.getByRole("button", { name: "Undo", exact: true }).click();
+  await expect(bar(modal, block0)).toHaveAttribute("aria-valuenow", "0.25");
+  await modal.getByRole("button", { name: "Redo", exact: true }).click();
+  await page.evaluate(() => navigator.clipboard.writeText("not json"));
+  await paste.click();
+  await expect(modal.getByRole("alert")).toContainText("Could not parse JSON");
+  await expect(bar(modal, block10)).toHaveAttribute("aria-valuenow", "0.5");
+  await modal.getByRole("button", { name: "Apply strengths" }).click();
+  await expect(page.getByTestId("lora-state")).toHaveText(
+    JSON.stringify({ version: 1, lora_name: "demo.safetensors", overrides }),
+  );
+  await page.goto("/preview/index.html?lora=1&loraState=broken");
+  await expect(modal.getByRole("button", { name: "Copy strength JSON", exact: true })).toBeDisabled();
+  await page.evaluate((text) => navigator.clipboard.writeText(text), pasted);
+  await paste.click();
+  await expect(modal.getByRole("alert")).toHaveCount(0);
+  await expect(modal.getByRole("button", { name: "Apply strengths" })).toBeEnabled();
+});
+
 const modules = ["attn_to_q", "attn_to_k", "attn_to_v", "attn_to_out", "mlp_fc1", "mlp_fc2", "norm1", "norm2"];
 const realistic = [
   ...Array.from({ length: 28 }, (_, i) => modules.map((module) => `lora_unet_blocks_${i}_${module}`)).flat(),

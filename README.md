@@ -14,6 +14,8 @@
 comfy node install Neriss_ComfyNodes
 ```
 
+Afterwards restart ComfyUI and refresh the browser.
+
 **Manual:**
 
 With manual install, you will need to pull the repo to update the nodepack.
@@ -23,8 +25,8 @@ cd /path/to/ComfyUI/custom_nodes
 git clone https://github.com/NerissG/Neriss_ComfyNodes.git
 ```
 
-The frontend is prebuilt. You do not need Node.js, pnpm or Nix.
-Restart ComfyUI and refresh the browser.
+The packaged frontend is built from the source in this repository. You do not need Node.js, pnpm or Nix.
+After cloning the repo, restart ComfyUI and refresh the browser.
 
 ## Nodes
 
@@ -104,6 +106,7 @@ Restart ComfyUI and refresh the browser.
 > - Blocks are read from the LoRA itself, so it works with any model family.
 > - Each multiplier scales the global MODEL/TE strength. `0` turns a block off; negative values are allowed.
 > - Changes take effect when you click **Apply strengths**.
+> - Copy and paste buttons buttons to export or import as JSON to the clipboard.
 > - If a LoRA doesn't seem to apply, check the `report` output.
 >
 > ![LoRA Strength Node](assets/readme/LoRA_Strength_Node.png)
@@ -161,7 +164,19 @@ Browser tests run with `pnpm run test:e2e` and need [Nix](https://nixos.org/down
 
 ### Building
 
-The built frontend in `web/dist` is committed, so users don't need Node.js. After frontend changes, run `pnpm run build` from `web/` and commit `web/dist` and `THIRD_PARTY_NOTICES.md` with your changes. CI fails if they are out of date.
+If you make changes to the frontend, run `pnpm run build` from `web/` and commit `web/dist` and `THIRD_PARTY_NOTICES.md` with your changes. CI will fails if they are out of date.
+
+### Frontend Build Provenance
+
+The JavaScript and CSS files in `web/dist/` are generated from the frontend source code in this repository (`web/`). They are committed and included in ComfyUI Registry releases so users can install the node pack without Node.js, pnpm, or Nix.
+
+- **Source:** `web/`
+- **Build configuration:** `web/package.json`
+- **Dependency lockfile:** `web/pnpm-lock.yaml`
+- **Build command:** `pnpm run build`
+- **Third-party attribution:** `THIRD_PARTY_NOTICES.md`
+
+The build can be reproduced using the instructions above. CI validates that the committed build artifacts match the source and that the third-party notices are up to date.
 
 ### Releasing
 

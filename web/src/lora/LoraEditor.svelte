@@ -4,6 +4,7 @@
   import { findWidget, readWidgetValue, writeWidgetValue } from "@/comfy/nodes";
   import type { ComfyNode } from "@/comfy/types";
   import { formatAppError } from "@/errors";
+  import { readClipboardText, writeClipboardText } from "@/shared/clipboard";
   import { createHistory, recordHistory, redoHistory, undoHistory, type History } from "@/shared/history";
   import Alert from "@/ui/Alert.svelte";
   import Dialog from "@/ui/Dialog.svelte";
@@ -81,6 +82,8 @@
   let inspecting = $state<string | null>(null);
   let moduleQuery = $state("");
   let bulkValue = $state(1);
+  let clipboardError = $state("");
+  let copied = $state(false);
   let mounted = false;
   let loadGeneration = 0;
   const strengths = $derived(history.present);
@@ -168,10 +171,31 @@
     anchor = null;
     inspecting = null;
     moduleQuery = "";
+    clipboardError = "";
+    copied = false;
     void load();
   }
   function update(overrides: Record<string, number>, group: string | null = null) {
     history = recordHistory(history, { version: 1, lora_name: loraName, overrides }, stateKey, group);
+    copied = false;
+  }
+  async function copyJson() {
+    const result = await writeClipboardText(JSON.stringify(strengths));
+    if (!mounted) return;
+    clipboardError = result.isErr() ? formatAppError(result.error) : "";
+    copied = result.isOk();
+  }
+  async function pasteJson() {
+    const name = loraName;
+    const result = await readClipboardText().andThen(parseStrengthState);
+    if (!mounted || name !== loraName) return;
+    if (result.isErr()) {
+      clipboardError = formatAppError(result.error);
+      return;
+    }
+    clipboardError = "";
+    stateError = "";
+    update(result.value.overrides);
   }
   function change(name: string, value: number | null) {
     const overrides = { ...strengths.overrides };
@@ -328,11 +352,26 @@
           title="Redo (Ctrl+Shift+Z)"
           disabled={disabled || !history.future.length}
           onclick={() => (history = redoHistory(history))}>↷</button
+        ><button
+          type="button"
+          class="quiet"
+          aria-label="Copy strength JSON"
+          title="Copy strengths as JSON"
+          disabled={Boolean(stateError)}
+          onclick={() => void copyJson()}><Icon name="copy" size={14} /></button
+        ><button
+          type="button"
+          class="quiet"
+          aria-label="Paste strength JSON"
+          title="Replace overrides with JSON from the clipboard"
+          onclick={() => void pasteJson()}><Icon name="paste" size={14} /></button
         >
+        {#if copied}<span class="copied" role="status">Copied</span>{/if}
       </div>
     </div>
-    {#if stateError || mismatch || error || manifest?.unsupported.length || (unused.length && !mismatch)}
+    {#if stateError || mismatch || error || clipboardError || manifest?.unsupported.length || (unused.length && !mismatch)}
       <div class="issues">
+        {#if clipboardError}<Alert message={clipboardError} />{/if}
         {#if stateError}<Alert message={stateError} action={{ label: "Reset overrides", onclick: reset }} />{/if}
         {#if mismatch}<Alert
             message={`Overrides belong to ${strengths.lora_name}.`}
@@ -562,10 +601,21 @@
     display: flex;
     flex-shrink: 0;
   }
+  .history {
+    align-items: center;
+  }
   .history button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     width: 26px;
     padding: 2px 0;
     font-size: 14px;
+  }
+  .copied {
+    margin-left: 4px;
+    font-size: 11px;
+    color: var(--accent);
   }
   .issues {
     padding: 5px 14px;

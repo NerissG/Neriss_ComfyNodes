@@ -22,7 +22,8 @@
   import ToggleGroup from "@/ui/ToggleGroup.svelte";
   import { layoutEditorNode } from "@/views";
   import { uploadReferenceImage, type ReferenceImage } from "./api";
-  import { readClipboardImage, readClipboardText, writeClipboardText } from "./clipboard";
+  import { readClipboardText, writeClipboardText } from "@/shared/clipboard";
+  import { readClipboardImage } from "./clipboard";
   import { editorModel, editorTitles, importPromptText, previewPrompt } from "./models";
   import { duplicateRegions, removeRegions } from "./regions";
   import {
