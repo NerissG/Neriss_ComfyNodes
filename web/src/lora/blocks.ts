@@ -92,16 +92,18 @@ export function filterBlockFamilies(
   });
 }
 
+function within(name: string, names: Set<string>): boolean {
+  return names.has(name) || targetGroups(name).some((group) => names.has(group));
+}
+
+/** Sets `names` to `value`, replacing overrides for every module nested under them. */
 export function setBlockMultipliers(
   overrides: Record<string, number>,
   names: Iterable<string>,
   value: number,
 ): Record<string, number> {
-  return { ...overrides, ...Object.fromEntries([...names].map((name) => [name, value])) };
-}
-
-function within(name: string, names: Set<string>): boolean {
-  return names.has(name) || targetGroups(name).some((group) => names.has(group));
+  const scope = [...names];
+  return { ...clearOverrides(overrides, scope), ...Object.fromEntries(scope.map((name) => [name, value])) };
 }
 
 /** Removes overrides for `names` and every module nested under them. */

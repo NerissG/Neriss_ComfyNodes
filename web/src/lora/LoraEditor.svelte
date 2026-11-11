@@ -15,6 +15,7 @@
   import {
     emptyStrengthState,
     parseStrengthState,
+    remapOverrides,
     strengthSchema,
     targetGroups,
     targetMultiplier,
@@ -195,7 +196,7 @@
     }
     clipboardError = "";
     stateError = "";
-    update(result.value.overrides);
+    update(remapOverrides(result.value.overrides, validNames));
   }
   function change(name: string, value: number | null) {
     const overrides = { ...strengths.overrides };
@@ -505,7 +506,7 @@
           onchange={(value) => (bulkValue = value)}
         /><button
           type="button"
-          title="Set the selected bars; nested module overrides stay unchanged"
+          title="Set the selected bars and every module inside them"
           disabled={disabled || !selected.size}
           onclick={() => update(setBlockMultipliers(strengths.overrides, selected, bulkValue))}>Set selected</button
         ><button

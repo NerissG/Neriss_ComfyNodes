@@ -4,7 +4,8 @@ import { createServer } from "vite";
 
 const server = await createServer({ server: { middlewareMode: true, ws: false }, appType: "custom" });
 after(() => server.close());
-const { targetGroups, targetMultiplier, parseStrengthState } = await server.ssrLoadModule("/src/lora/state.ts");
+const { targetGroups, targetMultiplier, parseStrengthState, remapOverrides } =
+  await server.ssrLoadModule("/src/lora/state.ts");
 const {
   buildBlockFamilies,
   blockChanged,
@@ -151,13 +152,14 @@ test("changed filter includes module overrides, explicit defaults and inherited 
   assert.equal(filterBlockFamilies(families, "", true, { "blocks.0.attn.q": 0 })[0].blocks.length, 1);
 });
 
-test("bulk edits keep module overrides; clearing names removes nested rules and leaves unrelated ones", () => {
+test("bulk edits replace module overrides; clearing names removes nested rules and leaves unrelated ones", () => {
   const original = { blocks: 0.9, "blocks.0.attn.q": 0.2, "blocks.1": 0.8, "blocks.10": 0.5 };
   const edited = setBlockMultipliers(original, ["blocks.0"], 0);
   assert.equal(edited["blocks.0"], 0);
-  assert.equal(edited["blocks.0.attn.q"], 0.2);
+  assert.equal(edited["blocks.0.attn.q"], undefined);
   assert.equal(original["blocks.0"], undefined);
-  assert.deepEqual(clearOverrides(edited, ["blocks.0"]), { blocks: 0.9, "blocks.1": 0.8, "blocks.10": 0.5 });
+  assert.deepEqual(clearOverrides(original, ["blocks.0"]), { blocks: 0.9, "blocks.1": 0.8, "blocks.10": 0.5 });
+  assert.deepEqual(clearOverrides(original, ["blocks.0.attn.q"]), { blocks: 0.9, "blocks.1": 0.8, "blocks.10": 0.5 });
   assert.deepEqual(clearOverrides(edited, ["blocks.0.attn.q"]), {
     blocks: 0.9,
     "blocks.0": 0,
@@ -227,4 +229,22 @@ test("text encoder targets are detected from Comfy's CLIP LoRA key prefixes", ()
   assert.equal(hasClipTargets(["lora_te_text_model_encoder_layers_0_mlp_fc1"]), true);
   assert.equal(hasClipTargets(["text_encoders.t5xxl.encoder.block.0.q"]), true);
   assert.equal(hasClipTargets(["lora_unet_llm_adapter_blocks_0_q", "diffusion_model.blocks.0.q"]), false);
+});
+
+test("pasted overrides are renamed between kohya and diffusion_model key styles", () => {
+  const kohya = ["lora_unet_blocks_20_attn_qkv", "lora_unet_blocks_21_attn_qkv"];
+  const kohyaNames = new Set(kohya.flatMap((name) => [...targetGroups(name), name]));
+  const dotted = ["diffusion_model.blocks.20.attn.qkv", "diffusion_model.blocks.21.attn.qkv"];
+  const dottedNames = new Set(dotted.flatMap((name) => [...targetGroups(name), name]));
+  assert.deepEqual(
+    remapOverrides({ "diffusion_model.blocks.20": 0, "diffusion_model.blocks.21.attn.qkv": 0.5, other: 2 }, kohyaNames),
+    { lora_unet_blocks_20: 0, lora_unet_blocks_21_attn_qkv: 0.5, other: 2 },
+  );
+  assert.deepEqual(remapOverrides({ lora_unet_blocks_20: 0, "diffusion_model.blocks.21": 1.5 }, dottedNames), {
+    "diffusion_model.blocks.20": 0,
+    "diffusion_model.blocks.21": 1.5,
+  });
+  assert.deepEqual(remapOverrides({ lora_unet_a_b: 1 }, new Set(["diffusion_model.a.b", "diffusion_model.a_b"])), {
+    lora_unet_a_b: 1,
+  });
 });

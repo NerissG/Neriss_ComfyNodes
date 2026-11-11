@@ -310,7 +310,7 @@ test("drafts persist on apply, cancel restores values and numeric controls allow
   await expect(page.getByTestId("lora-state")).toHaveText(saved ?? "");
 });
 
-test("bulk edit and reset work without overwriting module exceptions", async ({ page }) => {
+test("bulk edit sets nested modules and reset clears them", async ({ page }) => {
   const saved = JSON.stringify({ version: 1, lora_name: "demo.safetensors", overrides: { [`${block0}.attn.q`]: 0.2 } });
   await page.goto(`/preview/index.html?lora=1&loraState=${encodeURIComponent(saved)}`);
   const modal = page.getByRole("dialog", { name: "LoRA block strength editor" });
@@ -321,7 +321,7 @@ test("bulk edit and reset work without overwriting module exceptions", async ({ 
   await expect(bar(modal, block10)).toHaveAttribute("aria-valuenow", "0");
   await bar(modal, block0).click();
   const q = modal.getByRole("spinbutton", { name: `Multiplier ${block0}.attn.q`, exact: true });
-  await expect(q).toHaveValue("0.2");
+  await expect(q).toHaveValue("0");
   await modal.getByRole("button", { name: "Reset selected", exact: true }).click();
   await expect(q).toHaveValue("1");
   await modal.getByRole("button", { name: "Apply strengths" }).click();
@@ -389,6 +389,26 @@ test("strength JSON copies to and pastes from the clipboard as one undo step", a
   await paste.click();
   await expect(modal.getByRole("alert")).toHaveCount(0);
   await expect(modal.getByRole("button", { name: "Apply strengths" })).toBeEnabled();
+});
+
+test("pasted kohya-style keys map onto this LoRA's names", async ({ page }) => {
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.goto("/preview/index.html?lora=1");
+  const modal = page.getByRole("dialog", { name: "LoRA block strength editor" });
+  const overrides = { lora_unet_blocks_10: 0, lora_unet_blocks_0_attn_k: 0.5, lora_unet_blocks_99: 2 };
+  const pasted = JSON.stringify({ version: 1, lora_name: "other.safetensors", overrides });
+  await page.evaluate((text) => navigator.clipboard.writeText(text), pasted);
+  await modal.getByRole("button", { name: "Paste strength JSON", exact: true }).click();
+  await expect(bar(modal, block10)).toHaveAttribute("aria-valuenow", "0");
+  await expect(modal.getByText("1 unmatched overrides")).toBeVisible();
+  await modal.getByRole("button", { name: "Apply strengths" }).click();
+  await expect(page.getByTestId("lora-state")).toHaveText(
+    JSON.stringify({
+      version: 1,
+      lora_name: "demo.safetensors",
+      overrides: { [block10]: 0, [`${block0}.attn.k`]: 0.5, lora_unet_blocks_99: 2 },
+    }),
+  );
 });
 
 const modules = ["attn_to_q", "attn_to_k", "attn_to_v", "attn_to_out", "mlp_fc1", "mlp_fc2", "norm1", "norm2"];

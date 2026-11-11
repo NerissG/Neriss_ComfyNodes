@@ -47,3 +47,23 @@ export function targetMultiplier(target: string, overrides: Record<string, numbe
   }
   return 1;
 }
+
+// Comfy's LoRA key map aliases `diffusion_model.a.b` as `lora_unet_a_b`.
+function kohyaName(name: string): string {
+  return name.replace(/^diffusion_model\./, "lora_unet_").replaceAll(".", "_");
+}
+
+/** Renames overrides written in another trainer's key style to this LoRA's names; unmatched keys are kept. */
+export function remapOverrides(overrides: Record<string, number>, names: Set<string>): Record<string, number> {
+  const native = new Map<string, string | null>();
+  for (const name of names) {
+    const key = kohyaName(name);
+    native.set(key, native.has(key) ? null : name);
+  }
+  return Object.fromEntries(
+    Object.entries(overrides).map(([name, value]) => [
+      names.has(name) ? name : (native.get(kohyaName(name)) ?? name),
+      value,
+    ]),
+  );
+}
