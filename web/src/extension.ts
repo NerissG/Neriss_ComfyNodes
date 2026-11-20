@@ -9,7 +9,7 @@ import type { ComfyNode, ComfyNodeData, ComfyNodeType } from "@/comfy/types";
 import { encodeEditorState, parseEditorState, type EditorState } from "@/layout/state";
 import { editorModel, editorNodeIds, importPromptText } from "@/layout/models";
 import { LORA_NODE_ID } from "@/lora/state";
-import { connectResolutionSelector, RESOLUTION_SELECTOR_NODE_ID } from "@/resolution/selector";
+import { connectResolutionSelector, linkSquaredStep, RESOLUTION_SELECTOR_NODE_ID } from "@/resolution/selector";
 import { openLayoutEditor, openLoraEditor, openPresetEditor } from "@/views";
 
 const OPEN_EDITOR_LABEL = "Open Layout Editor";
@@ -78,6 +78,7 @@ function ensureResolutionSelectorControls(node: ComfyNode) {
   hideWidget(node, "preset_aspect_y");
   addButton(node, MANAGE_RESOLUTION_PRESETS_LABEL, openPresetEditor);
   connectResolutionSelector(node);
+  linkSquaredStep(node);
 }
 
 function ensureLoraControls(node: ComfyNode) {

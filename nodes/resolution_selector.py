@@ -171,7 +171,7 @@ class NerissResolutionSelector(io.ComfyNode):
                     default=1024,
                     min=64,
                     max=16384,
-                    step=64,
+                    step=16,
                     socketless=True,
                     tooltip=(
                         "Square side length in pixels; total pixels = squared x squared, "

@@ -10,7 +10,7 @@ const server = await createServer({ server: { middlewareMode: true, ws: false },
 after(() => server.close());
 const { createPresetLibrary } = await server.ssrLoadModule("/src/shared/library.ts");
 const { presetLibrary } = await server.ssrLoadModule("/src/resolution/store.ts");
-const { connectResolutionSelector } = await server.ssrLoadModule("/src/resolution/selector.ts");
+const { connectResolutionSelector, linkSquaredStep } = await server.ssrLoadModule("/src/resolution/selector.ts");
 const { calculateResolution } = await server.ssrLoadModule("/src/resolution/sizing.ts");
 const { saveResolutionPresets } = await server.ssrLoadModule("/src/resolution/api.ts");
 const { comfyErrors } = await server.ssrLoadModule("/src/errors.ts");
@@ -209,4 +209,16 @@ test("frontend sizing matches the shared Python cases", async () => {
   for (const { aspect_x, aspect_y, target_pixels, multiple, width, height } of cases) {
     assert.deepEqual(calculateResolution(aspect_x, aspect_y, target_pixels, multiple), { width, height });
   }
+});
+
+test("squared steps by the current multiple", () => {
+  const squared = { name: "squared", value: 1024, options: { step: 160, step2: 16 } };
+  const multiple = { name: "multiple", value: 16 };
+  const node = { id: "step", widgets: [squared, multiple], addWidget: () => {} };
+  linkSquaredStep(node);
+  assert.equal(squared.options.step2, 16);
+  multiple.value = 8;
+  assert.equal(squared.options.step2, 8);
+  linkSquaredStep(node);
+  assert.equal(squared.options.step2, 8);
 });

@@ -49,3 +49,16 @@ export function connectResolutionSelector(node: ComfyNode) {
   };
   void presetLibrary.ensureLoaded().mapErr((error) => console.error(error));
 }
+
+/** Steps `squared` by the node's current `multiple` instead of the fixed schema step. */
+export function linkSquaredStep(node: ComfyNode) {
+  const options = findWidget(node, "squared")?.options;
+  if (!options) return;
+  Object.defineProperty(options, "step2", {
+    configurable: true,
+    get: () => {
+      const multiple = readWidgetValue(node, "multiple");
+      return typeof multiple === "number" && multiple > 0 ? multiple : 1;
+    },
+  });
+}
