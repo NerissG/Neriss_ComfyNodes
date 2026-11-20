@@ -55,6 +55,7 @@ export const commandIdSchema = z.enum([
   "panel.regions",
   "panel.scene",
   "panel.canvas",
+  "panel.presets",
   "canvas.left",
   "canvas.right",
   "canvas.up",
@@ -163,6 +164,13 @@ export const shortcutCommands: ShortcutCommand[] = [
     category: "View & panels",
     scope: "editor",
     defaults: [binding("3", "Alt")],
+  },
+  {
+    id: "panel.presets",
+    label: "Presets panel",
+    category: "View & panels",
+    scope: "editor",
+    defaults: [binding("4", "Alt")],
   },
   ...(
     [

@@ -45,6 +45,7 @@ DEFAULT_BINDINGS: dict[str, list[KeyBinding]] = {
     "panel.regions": [{"key": "1", "modifiers": ["Alt"]}],
     "panel.scene": [{"key": "2", "modifiers": ["Alt"]}],
     "panel.canvas": [{"key": "3", "modifiers": ["Alt"]}],
+    "panel.presets": [{"key": "4", "modifiers": ["Alt"]}],
     **{
         f"canvas.{direction}{suffix}": [{"key": f"arrow{direction}", "modifiers": modifiers}]
         for direction in ("left", "right", "up", "down")

@@ -2,12 +2,13 @@ import { errAsync, type ResultAsync } from "neverthrow";
 import { z } from "zod";
 import { comfyUrl, fetchLibrary, jsonBody, requestJson } from "@/comfy/api";
 import { editorErrors, type AppError } from "@/errors";
-import { stylePresetSchema, type StylePreset } from "./state";
+import { MAX_PRESETS } from "./limits";
+import { layoutPresetSchema, type LayoutPreset } from "./state";
 
-const stylePresetPayloadSchema = z.object({
+export const layoutPresetPayloadSchema = z.object({
   presets: z
-    .array(stylePresetSchema)
-    .max(256)
+    .array(layoutPresetSchema)
+    .max(MAX_PRESETS)
     .refine(
       (presets) =>
         new Set(presets.map((preset) => preset.id)).size === presets.length &&
@@ -15,21 +16,21 @@ const stylePresetPayloadSchema = z.object({
       "Preset IDs and names must be unique",
     ),
 });
-const stylePresetEndpoint = "/neriss_comfynodes/ideogram/style_presets";
+const layoutPresetEndpoint = "/neriss_comfynodes/editor/presets";
 
-export function loadStylePresets(): ResultAsync<StylePreset[], AppError> {
-  return requestJson(stylePresetEndpoint, stylePresetPayloadSchema, "style presets", undefined, fetchLibrary).map(
+export function loadLayoutPresets(): ResultAsync<LayoutPreset[], AppError> {
+  return requestJson(layoutPresetEndpoint, layoutPresetPayloadSchema, "layout presets", undefined, fetchLibrary).map(
     (payload) => payload.presets,
   );
 }
 
-export function saveStylePresets(presets: StylePreset[]): ResultAsync<StylePreset[], AppError> {
-  const payload = stylePresetPayloadSchema.safeParse({ presets });
-  if (!payload.success) return errAsync(editorErrors.runtime("Invalid style presets"));
+export function saveLayoutPresets(presets: LayoutPreset[]): ResultAsync<LayoutPreset[], AppError> {
+  const payload = layoutPresetPayloadSchema.safeParse({ presets });
+  if (!payload.success) return errAsync(editorErrors.runtime("Invalid layout presets"));
   return requestJson(
-    stylePresetEndpoint,
-    stylePresetPayloadSchema,
-    "style presets",
+    layoutPresetEndpoint,
+    layoutPresetPayloadSchema,
+    "layout presets",
     jsonBody(payload.data),
     fetchLibrary,
   ).map((saved) => saved.presets);

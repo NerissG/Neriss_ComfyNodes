@@ -30,45 +30,50 @@ const editorRegionSchema = z.object({
   color_palette: z.array(hexColorSchema).max(5).default([]),
 });
 
-const editorStateSchema = z.object({
-  version: z.literal(1).default(1),
+const editorElementsSchema = z
+  .array(editorRegionSchema)
+  .max(MAX_REGIONS)
+  .superRefine((elements, context) => {
+    const byId = new Map(elements.map((region) => [region.id, region]));
+    for (const [index, region] of elements.entries()) {
+      if (elements.findIndex((item) => item.id === region.id) !== index) {
+        context.addIssue({ code: "custom", path: [index, "id"], message: "Region IDs must be unique" });
+      }
+      const seen = new Set([region.id]);
+      let parentId = region.parent_id;
+      while (parentId != null) {
+        const parent = byId.get(parentId);
+        if (!parent || seen.has(parentId)) {
+          context.addIssue({
+            code: "custom",
+            path: [index, "parent_id"],
+            message: "Region parents must exist and cannot form a cycle",
+          });
+          break;
+        }
+        seen.add(parentId);
+        parentId = parent.parent_id;
+      }
+    }
+  });
+
+const editorCanvasSchema = z.object({
   width: z.number().int().positive().default(1024),
   height: z.number().int().positive().default(1024),
   megapixels: z.number().positive().default(1),
   side_step: z.number().int().positive().default(64),
   size_mode: z.enum(["megapixels", "squared"]).default("megapixels"),
   target_locked: z.boolean().default(false),
+});
+
+const editorStateSchema = z.object({
+  version: z.literal(1).default(1),
+  ...editorCanvasSchema.shape,
   high_level_description: textSchema.default(""),
   background: textSchema.default("Dark gray design canvas with a subtle grid."),
   style_description: editorStyleSchema.prefault({}),
   moss_meta: z.array(textSchema).max(MAX_TAGS).default([]),
-  elements: z
-    .array(editorRegionSchema)
-    .max(MAX_REGIONS)
-    .default([])
-    .superRefine((elements, context) => {
-      const byId = new Map(elements.map((region) => [region.id, region]));
-      for (const [index, region] of elements.entries()) {
-        if (elements.findIndex((item) => item.id === region.id) !== index) {
-          context.addIssue({ code: "custom", path: [index, "id"], message: "Region IDs must be unique" });
-        }
-        const seen = new Set([region.id]);
-        let parentId = region.parent_id;
-        while (parentId != null) {
-          const parent = byId.get(parentId);
-          if (!parent || seen.has(parentId)) {
-            context.addIssue({
-              code: "custom",
-              path: [index, "parent_id"],
-              message: "Region parents must exist and cannot form a cycle",
-            });
-            break;
-          }
-          seen.add(parentId);
-          parentId = parent.parent_id;
-        }
-      }
-    }),
+  elements: editorElementsSchema.default([]),
   selected_region_id: textSchema.nullable().default(null),
   selected_tool: z.enum(["obj", "text"]).default("obj"),
   reference_image_path: textSchema.nullable().default(null),
@@ -84,12 +89,25 @@ export type PlacedRegion = EditorRegion & { bbox: Bbox };
 export function hasRegionBbox(region: EditorRegion): region is PlacedRegion {
   return region.bbox !== null;
 }
-export const stylePresetSchema = z.object({
+const presetPartsSchema = z
+  .strictObject({
+    elements: editorElementsSchema.optional(),
+    high_level_description: textSchema.optional(),
+    moss_meta: z.array(textSchema).max(MAX_TAGS).optional(),
+    style_description: editorStyleSchema.optional(),
+    background: textSchema.optional(),
+    canvas: editorCanvasSchema.strict().optional(),
+  })
+  .refine((parts) => Object.keys(parts).length > 0, "Presets need at least one part");
+export const layoutPresetSchema = z.object({
   id: textSchema.min(1),
   name: textSchema.trim().min(1),
-  style: editorStyleSchema,
+  parts: presetPartsSchema,
 });
-export type StylePreset = z.infer<typeof stylePresetSchema>;
+export type LayoutPreset = z.infer<typeof layoutPresetSchema>;
+export type PresetParts = LayoutPreset["parts"];
+export type PresetPart = keyof PresetParts;
+export type ApplyMode = "replace" | "append";
 
 export function createInitialState(): EditorState {
   return editorStateSchema.parse({});
@@ -128,8 +146,60 @@ export function encodeEditorState(state: EditorState): NeverthrowResult<string, 
   return ok(text);
 }
 
-export function cloneStyle(style: EditorStyle): EditorStyle {
-  return { ...style, color_palette: [...style.color_palette] };
+export function capturePreset(state: EditorState, parts: PresetPart[]): PresetParts {
+  return structuredClone({
+    ...(parts.includes("elements") ? { elements: state.elements } : {}),
+    ...(parts.includes("high_level_description") ? { high_level_description: state.high_level_description } : {}),
+    ...(parts.includes("moss_meta") ? { moss_meta: state.moss_meta } : {}),
+    ...(parts.includes("style_description") ? { style_description: state.style_description } : {}),
+    ...(parts.includes("background") ? { background: state.background } : {}),
+    ...(parts.includes("canvas")
+      ? {
+          canvas: {
+            width: state.width,
+            height: state.height,
+            megapixels: state.megapixels,
+            side_step: state.side_step,
+            size_mode: state.size_mode,
+            target_locked: state.target_locked,
+          },
+        }
+      : {}),
+  });
+}
+
+/** Preset regions get fresh IDs so repeated appends never collide with the canvas or each other. */
+function renewRegionIds(elements: EditorRegion[]): EditorRegion[] {
+  const ids = new Map(elements.map((region) => [region.id, `${region.type}-${crypto.randomUUID()}`]));
+  return structuredClone(elements).map((region) => ({
+    ...region,
+    id: ids.get(region.id) ?? region.id,
+    parent_id: region.parent_id == null ? region.parent_id : ids.get(region.parent_id),
+  }));
+}
+
+export function applyPreset(
+  state: EditorState,
+  preset: PresetParts,
+  parts: PresetPart[],
+  mode: ApplyMode,
+): NeverthrowResult<EditorState, AppError> {
+  const next = { ...state };
+  if (preset.elements && parts.includes("elements")) {
+    const elements = renewRegionIds(preset.elements);
+    next.elements = mode === "append" ? [...state.elements, ...elements] : elements;
+    if (next.elements.length > MAX_REGIONS)
+      return err(editorErrors.runtime(`Layouts are limited to ${MAX_REGIONS} regions`));
+    if (mode === "replace") next.selected_region_id = null;
+  }
+  if (preset.high_level_description !== undefined && parts.includes("high_level_description"))
+    next.high_level_description = preset.high_level_description;
+  if (preset.moss_meta && parts.includes("moss_meta")) next.moss_meta = [...preset.moss_meta];
+  if (preset.style_description && parts.includes("style_description"))
+    next.style_description = structuredClone(preset.style_description);
+  if (preset.background !== undefined && parts.includes("background")) next.background = preset.background;
+  // Region boxes are canvas-relative, so they keep their placement whether or not the canvas is applied.
+  return ok(preset.canvas && parts.includes("canvas") ? { ...next, ...preset.canvas } : next);
 }
 
 export function createRegion(type: RegionTool, bbox: Bbox | null = null): EditorRegion {

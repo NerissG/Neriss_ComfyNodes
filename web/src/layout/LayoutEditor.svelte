@@ -42,6 +42,7 @@
   import IdeogramPanel from "./ideogram/IdeogramPanel.svelte";
   import MossPanel from "./moss/MossPanel.svelte";
   import CanvasPanel from "./CanvasPanel.svelte";
+  import PresetPanel from "./PresetPanel.svelte";
   import LayoutCanvas from "./LayoutCanvas.svelte";
   import RegionPanel from "./RegionPanel.svelte";
   import "./layout.css";
@@ -74,6 +75,7 @@
     { id: "regions", label: "Regions", command: "panel.regions" },
     { id: "scene", label: "Scene & style", command: "panel.scene" },
     { id: "canvas", label: "Canvas", command: "panel.canvas" },
+    { id: "presets", label: "Presets", command: "panel.presets" },
   ] satisfies { id: string; label: string; command: CommandId }[];
   let activeTab = "regions";
   let editGroup: string | null = null;
@@ -627,12 +629,17 @@
                 onzoom={() => canvas?.zoomToSelection()}
               />
             {:else if activeTab === "scene"}
-              {#if model === "ideogram"}<IdeogramPanel
+              {#if model === "ideogram"}<IdeogramPanel {state} onchange={persist} />{:else}<MossPanel
                   {state}
                   onchange={persist}
-                  onerror={setError}
-                  onnotice={setNotice}
-                />{:else}<MossPanel {state} onchange={persist} />{/if}
+                />{/if}
+            {:else if activeTab === "presets"}<PresetPanel
+                layout={state}
+                {model}
+                onchange={persist}
+                onerror={setError}
+                onnotice={setNotice}
+              />
             {:else}<CanvasPanel
                 {state}
                 onchange={persist}

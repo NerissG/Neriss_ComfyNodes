@@ -38,7 +38,7 @@ After cloning the repo, restart ComfyUI and refresh the browser.
 > <summary>ℹ️ <i>See More Information</i></summary>
 >
 > - Click **Open Layout Editor**, draw regions on the canvas, then describe the scene and each region.
-> - Reusable style presets and an optional reference image to trace over.
+> - Save regions, description, background, style and canvas size as **Presets**, then apply them separately or together. An optional reference image can be traced over.
 > - Connect `json_prompt` to your model's prompt input and use the node's `width` and `height` to create the latent.
 > - Also outputs a reference/grid image, an annotated preview and pixel bounding boxes.
 > - Paste an existing prompt with **Import JSON** to edit it visually, or connect one to `import_json` to apply it on execution.
@@ -56,6 +56,7 @@ After cloning the repo, restart ComfyUI and refresh the browser.
 >
 > - Click **Open Layout Editor** to draw regions.
 > - Add and sort the summary tags alongside the scene caption.
+> - Save items, caption, meta tags and canvas size as **Presets**, then apply them separately or together. Presets are shared with the Ideogram 4 editor.
 > - Connect `json_prompt` to your model's prompt input and use the node's `width` and `height` to create the latent.
 > - Also outputs a reference/grid image, an annotated preview and pixel bounding boxes.
 > - Paste an existing prompt with **Import JSON** to edit it visually, or connect one to `import_json` to apply it on execution.

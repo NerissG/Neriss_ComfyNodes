@@ -12,7 +12,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Literal, TypeAlias
+from typing import Literal, TypeAlias, TypeGuard
 
 import folder_paths
 import torch
@@ -24,6 +24,7 @@ from . import EditorError, Err, Ok, Result
 from .json_store import load_store, parse_json, request_json, save_store, store_response
 from .limits import (
     MAX_COLORS,
+    MAX_PRESETS,
     MAX_REGIONS,
     MAX_SAFE_INTEGER,
     MAX_TAGS,
@@ -115,12 +116,7 @@ def parse_state(value: str) -> Result[dict[str, object], EditorError]:
     if style is None:
         return Err(EditorError("Invalid editor style"))
     state["style_description"] = style
-    meta = state["moss_meta"]
-    if (
-        not isinstance(meta, list)
-        or len(meta) > MAX_TAGS
-        or not all(isinstance(tag, str) and len(tag) <= MAX_TEXT_LENGTH for tag in meta)
-    ):
+    if not valid_tags(state["moss_meta"]):
         return Err(EditorError("Invalid editor metadata tags"))
     for key in ("reference_image_path", "reference_image_name", "selected_region_id"):
         text = state.get(key)
@@ -132,6 +128,14 @@ def parse_state(value: str) -> Result[dict[str, object], EditorError]:
     ):
         return Err(EditorError("Invalid editor image fitting or selected tool"))
     return Ok(state)
+
+
+def valid_text(value: object) -> TypeGuard[str]:
+    return isinstance(value, str) and len(value) <= MAX_TEXT_LENGTH
+
+
+def valid_tags(value: object) -> bool:
+    return isinstance(value, list) and len(value) <= MAX_TAGS and all(valid_text(tag) for tag in value)
 
 
 def valid_palette(value: object, maximum: int) -> bool:
@@ -616,6 +620,105 @@ async def save_color_library(request: web.Request) -> web.Response:
             library,
             default_color_library,
             normalize_color_library,
+            request.headers.get("If-Match"),
+        )
+    )
+
+
+PRESET_PARTS = ("elements", "high_level_description", "moss_meta", "style_description", "background", "canvas")
+CANVAS_FIELDS = {"width", "height", "megapixels", "side_step", "size_mode", "target_locked"}
+
+
+def layout_presets_path() -> Path:
+    return Path(folder_paths.get_user_directory()) / "Neriss_ComfyNodes" / "layout_presets.json"
+
+
+def valid_canvas(value: object) -> bool:
+    if not isinstance(value, dict) or set(value) != CANVAS_FIELDS:
+        return False
+    sides = [value.get(key) for key in ("width", "height", "side_step")]
+    megapixels = finite_number(value.get("megapixels"))
+    return (
+        all(type(side) is int and 1 <= side <= MAX_SAFE_INTEGER for side in sides)
+        and megapixels is not None
+        and megapixels > 0
+        and value.get("size_mode") in ("megapixels", "squared")
+        and isinstance(value.get("target_locked"), bool)
+    )
+
+
+def normalize_preset_parts(value: object) -> dict[str, object] | None:
+    if not isinstance(value, dict) or not value or not set(value) <= set(PRESET_PARTS):
+        return None
+    parts: dict[str, object] = {}
+    for key in PRESET_PARTS:
+        if key not in value:
+            continue
+        item = value.get(key)
+        if key == "elements":
+            valid = not isinstance(read_regions(item), Err)
+        elif key == "style_description":
+            item = normalize_editor_style(item)
+            valid = item is not None
+        elif key == "moss_meta":
+            valid = valid_tags(item)
+        elif key == "canvas":
+            valid = valid_canvas(item)
+        else:
+            valid = valid_text(item)
+        if not valid:
+            return None
+        parts[key] = item
+    return parts
+
+
+def normalize_layout_presets(value: object) -> dict[str, list[dict[str, object]]] | None:
+    if not isinstance(value, dict):
+        return None
+    items = value.get("presets")
+    if not isinstance(items, list) or len(items) > MAX_PRESETS:
+        return None
+    presets: list[dict[str, object]] = []
+    ids: set[str] = set()
+    names: set[str] = set()
+    for item in items:
+        if not isinstance(item, dict):
+            return None
+        preset_id, name = item.get("id"), item.get("name")
+        parts = normalize_preset_parts(item.get("parts"))
+        if not isinstance(preset_id, str) or not preset_id or len(preset_id) > MAX_TEXT_LENGTH or preset_id in ids:
+            return None
+        if not valid_text(name) or not name.strip() or name.strip() in names or parts is None:
+            return None
+        ids.add(preset_id)
+        names.add(name.strip())
+        presets.append({"id": preset_id, "name": name.strip(), "parts": parts})
+    return {"presets": presets}
+
+
+def default_layout_presets() -> dict[str, list[dict[str, object]]]:
+    return {"presets": []}
+
+
+@routes.get("/neriss_comfynodes/editor/presets")
+async def get_layout_presets(_: web.Request) -> web.Response:
+    return store_response(load_store(layout_presets_path(), default_layout_presets, normalize_layout_presets))
+
+
+@routes.post("/neriss_comfynodes/editor/presets")
+async def save_layout_presets(request: web.Request) -> web.Response:
+    content = await request_json(request)
+    if isinstance(content, Err):
+        return store_response(content, 400)
+    presets = normalize_layout_presets(content.value)
+    if presets is None:
+        return web.json_response({"error": "Invalid layout presets"}, status=400)
+    return store_response(
+        save_store(
+            layout_presets_path(),
+            presets,
+            default_layout_presets,
+            normalize_layout_presets,
             request.headers.get("If-Match"),
         )
     )

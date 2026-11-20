@@ -1,18 +1,14 @@
-"""Ideogram-specific prompt conversion and style presets for the shared editor."""
+"""Ideogram-specific prompt conversion for the shared editor."""
 
 from __future__ import annotations
 
 import math
 from dataclasses import replace
-from pathlib import Path
 
-import folder_paths
 import torch
-from aiohttp import web
 from comfy_api.latest import io
 
 from ..shared import EditorError, Err, Ok, Result
-from ..shared.json_store import load_store, request_json, save_store, store_response
 from ..shared.layout_editor import (
     DEFAULT_STYLE,
     EditorLayout,
@@ -21,15 +17,13 @@ from ..shared.layout_editor import (
     editor_inputs,
     editor_outputs,
     layout_output,
-    normalize_editor_style,
     normalize_hex_palette,
     parse_json_object,
     prepare_layout,
     read_bbox,
-    routes,
     valid_palette,
 )
-from ..shared.limits import MAX_PRESETS, MAX_REGIONS, MAX_TEXT_LENGTH
+from ..shared.limits import MAX_REGIONS, MAX_TEXT_LENGTH
 
 
 def build_style_description(value: object) -> dict[str, object] | None:
@@ -143,10 +137,6 @@ def import_ideogram_prompt(layout: EditorLayout, value: str) -> Result[EditorLay
     return Ok(replace(layout, state=state, regions=regions))
 
 
-def style_presets_path() -> Path:
-    return Path(folder_paths.get_input_directory()) / "Neriss_ComfyNodes" / "ideogram_v4_style_presets.json"
-
-
 def valid_prompt_style(value: object) -> bool:
     if not isinstance(value, dict):
         return False
@@ -159,64 +149,6 @@ def valid_prompt_style(value: object) -> bool:
         if not isinstance(text, str) or len(text) > MAX_TEXT_LENGTH:
             return False
     return valid_palette(value.get("color_palette", []), 16)
-
-
-def default_style_presets() -> dict[str, list[dict[str, object]]]:
-    return {"presets": []}
-
-
-def normalize_style_presets(value: object) -> dict[str, list[dict[str, object]]] | None:
-    if not isinstance(value, dict):
-        return None
-    items = value.get("presets")
-    if not isinstance(items, list) or len(items) > MAX_PRESETS:
-        return None
-    presets: list[dict[str, object]] = []
-    ids: set[str] = set()
-    names: set[str] = set()
-    for item in items:
-        if not isinstance(item, dict):
-            return None
-        preset_id, name = item.get("id"), item.get("name")
-        style = normalize_editor_style(item.get("style"))
-        if not isinstance(preset_id, str) or not preset_id or len(preset_id) > MAX_TEXT_LENGTH or preset_id in ids:
-            return None
-        if (
-            not isinstance(name, str)
-            or not name.strip()
-            or len(name) > MAX_TEXT_LENGTH
-            or name.strip() in names
-            or style is None
-        ):
-            return None
-        ids.add(preset_id)
-        names.add(name.strip())
-        presets.append({"id": preset_id, "name": name.strip(), "style": style})
-    return {"presets": presets}
-
-
-@routes.get("/neriss_comfynodes/ideogram/style_presets")
-async def get_style_presets(_: web.Request) -> web.Response:
-    return store_response(load_store(style_presets_path(), default_style_presets, normalize_style_presets))
-
-
-@routes.post("/neriss_comfynodes/ideogram/style_presets")
-async def save_style_presets(request: web.Request) -> web.Response:
-    content = await request_json(request)
-    if isinstance(content, Err):
-        return store_response(content, 400)
-    presets = normalize_style_presets(content.value)
-    if presets is None:
-        return web.json_response({"error": "Invalid style presets"}, status=400)
-    return store_response(
-        save_store(
-            style_presets_path(),
-            presets,
-            default_style_presets,
-            normalize_style_presets,
-            request.headers.get("If-Match"),
-        )
-    )
 
 
 class NerissIdeogramV4PromptEditor(io.ComfyNode):

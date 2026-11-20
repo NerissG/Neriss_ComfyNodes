@@ -50,10 +50,10 @@ class StoreRouteTests(unittest.IsolatedAsyncioTestCase):
                 {"favorites": ["#FFFFFF"], "recent": ["#123ABC"]},
             ),
             StoreCase(
-                "/neriss_comfynodes/ideogram/style_presets",
-                ideogram.style_presets_path,
-                {"presets": [{"id": "first", "name": "First", "style": style}]},
-                {"presets": [{"id": "second", "name": "Second", "style": style}]},
+                "/neriss_comfynodes/editor/presets",
+                layout.layout_presets_path,
+                {"presets": [{"id": "first", "name": "First", "parts": {"style_description": style}}]},
+                {"presets": [{"id": "second", "name": "Second", "parts": {"moss_meta": ["poster"]}}]},
             ),
             StoreCase(
                 "/neriss_comfynodes/resolution/presets",
@@ -149,12 +149,58 @@ class StoreRouteTests(unittest.IsolatedAsyncioTestCase):
         for endpoint, payload in (
             ("resolution/presets", {"presets": [{"name": "Too wide", "x": 100001, "y": 1}]}),
             ("resolution/presets", {"presets": [{"name": "Same", "x": 1, "y": 1}] * 2}),
-            ("ideogram/style_presets", {"presets": [{"nonsense": True}]}),
+            ("editor/presets", {"presets": [{"nonsense": True}]}),
+            ("editor/presets", {"presets": [{"id": "empty", "name": "Empty", "parts": {}}]}),
+            ("editor/presets", {"presets": [{"id": "unknown", "name": "Unknown", "parts": {"width": 512}}]}),
+            ("editor/presets", {"presets": [{"id": "meta", "name": "Meta", "parts": {"moss_meta": [1]}}]}),
+            ("editor/presets", {"presets": [{"id": "size", "name": "Size", "parts": {"canvas": {"width": 512}}}]}),
+            (
+                "editor/presets",
+                {
+                    "presets": [
+                        {"id": "cycle", "name": "Cycle", "parts": {"elements": [{"type": "obj", "parent_id": "x"}]}}
+                    ]
+                },
+            ),
+            (
+                "editor/presets",
+                {"presets": [{"id": "same", "name": "Same", "parts": {"background": ""}}] * 2},
+            ),
             ("editor/colors", {"favorites": ["not a color"], "recent": []}),
         ):
             with self.subTest(endpoint=endpoint):
                 response = await self.client.post(f"/neriss_comfynodes/{endpoint}", json=payload)
                 self.assertEqual(response.status, 400)
+
+    async def test_layout_presets_keep_region_hierarchy_canvas_and_complete_partial_styles(self) -> None:
+        elements = [
+            {"id": "card", "type": "obj", "label": "character", "bbox": [0, 0, 500, 500], "desc": "Fox girl"},
+            {"id": "title", "parent_id": "card", "type": "text", "bbox": None, "desc": "", "text": "Hi"},
+        ]
+        parts = {
+            "elements": elements,
+            "high_level_description": "Poster",
+            "moss_meta": ["flat colors"],
+            "style_description": {"mode": "photo"},
+            "background": "Grid",
+            "canvas": {
+                "width": 832,
+                "height": 1216,
+                "megapixels": 1,
+                "side_step": 64,
+                "size_mode": "megapixels",
+                "target_locked": True,
+            },
+        }
+        response = await self.client.post(
+            "/neriss_comfynodes/editor/presets", json={"presets": [{"id": "all", "name": " All ", "parts": parts}]}
+        )
+        self.assertEqual(response.status, 200)
+        (preset,) = (await response.json())["presets"]
+        self.assertEqual(preset["name"], "All")
+        self.assertEqual(preset["parts"]["elements"], elements)
+        self.assertEqual(preset["parts"]["canvas"], parts["canvas"])
+        self.assertEqual(preset["parts"]["style_description"], {**layout.DEFAULT_STYLE, "mode": "photo"})
 
 
 def png_bytes() -> bytes:

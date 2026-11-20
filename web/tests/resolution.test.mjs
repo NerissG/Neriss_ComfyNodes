@@ -8,7 +8,8 @@ import { get } from "svelte/store";
 
 const server = await createServer({ server: { middlewareMode: true, ws: false }, appType: "custom" });
 after(() => server.close());
-const { createPresetLibrary, presetLibrary } = await server.ssrLoadModule("/src/resolution/store.ts");
+const { createPresetLibrary } = await server.ssrLoadModule("/src/shared/library.ts");
+const { presetLibrary } = await server.ssrLoadModule("/src/resolution/store.ts");
 const { connectResolutionSelector } = await server.ssrLoadModule("/src/resolution/selector.ts");
 const { calculateResolution } = await server.ssrLoadModule("/src/resolution/sizing.ts");
 const { saveResolutionPresets } = await server.ssrLoadModule("/src/resolution/api.ts");

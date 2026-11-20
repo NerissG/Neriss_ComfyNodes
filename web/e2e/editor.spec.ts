@@ -307,7 +307,7 @@ test("shortcut categories stay compact and row options work with keyboard and sm
   for (const [label, count] of [
     ["Tools", 5],
     ["Editing", 4],
-    ["View", 7],
+    ["View", 8],
     ["Movement", 8],
   ] satisfies [string, number][]) {
     await categories.getByRole("button", { name: new RegExp(`^${label}`) }).click();
@@ -462,6 +462,7 @@ for (const model of ["moss", "ideogram"] satisfies EditorModel[]) {
     for (const [key, label] of [
       ["2", "Scene & style"],
       ["3", "Canvas"],
+      ["4", "Presets"],
       ["1", "Regions"],
     ]) {
       await dialog.focus();
