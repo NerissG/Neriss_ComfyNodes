@@ -1314,7 +1314,42 @@ test("native text clipboard editing stays inside the editor, expanded fields and
   expect(await page.locator("html").getAttribute("data-host-event")).toBeNull();
 });
 
-test("native image paste automatically matches the canvas and is one undo step", async ({ page }) => {
+for (const model of ["moss", "ideogram"] satisfies EditorModel[]) {
+  test(`${model}: Ctrl+V imports a prompt from the canvas as one undo step`, async ({ page }) => {
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+    await openEditor(page, model);
+    const original = await readState(page);
+    const caption = "A church on a mountain ridge";
+    const prompt =
+      model === "moss"
+        ? {
+            summary: { caption },
+            items: [{ label: "object", caption: "Stone church", bbox: [376, 269, 638, 996] }],
+          }
+        : {
+            high_level_description: caption,
+            compositional_deconstruction: {
+              background: "Blue sky",
+              elements: [{ type: "obj", desc: "Stone church", bbox: [269, 376, 996, 638] }],
+            },
+          };
+    await page.evaluate((text) => navigator.clipboard.writeText(text), JSON.stringify(prompt));
+    const canvas = page.getByRole("application", { name: "Layout canvas" });
+    await canvas.focus();
+    await page.keyboard.press("Control+v");
+    await expect(page.locator(".region-item")).toHaveCount(1);
+    await expect(canvas).toBeFocused();
+    const imported = await readState(page);
+    expect(imported.high_level_description).toBe(caption);
+    expect(imported.elements[0]).toMatchObject({ desc: "Stone church", bbox: [269, 376, 996, 638] });
+    await page.keyboard.press("Control+z");
+    expect(await readState(page)).toEqual(original);
+  });
+}
+
+test("native image paste takes priority over clipboard text, matches the canvas and is one undo step", async ({
+  page,
+}) => {
   await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
   // Host extensions claim pastes for a selected graph node before the editor's listeners, except in editable targets.
   await page.addInitScript(() => {
@@ -1343,7 +1378,14 @@ test("native image paste automatically matches the canvas and is one undo step",
     image.height = 607;
     const blob = await new Promise<Blob | null>((resolve) => image.toBlob(resolve, "image/png"));
     if (!blob) return false;
-    await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+    await navigator.clipboard.write([
+      new ClipboardItem({
+        "image/png": blob,
+        "text/plain": new Blob([JSON.stringify({ summary: { caption: "Clipboard text" }, items: [] })], {
+          type: "text/plain",
+        }),
+      }),
+    ]);
     return true;
   });
   expect(copied).toBe(true);
@@ -1354,6 +1396,7 @@ test("native image paste automatically matches the canvas and is one undo step",
   await expect(canvas).toBeFocused();
   const pasted = await readState(page);
   expect([pasted.width, pasted.height]).toEqual([913, 607]);
+  expect(pasted.elements).toHaveLength(9);
   await page.getByRole("button", { name: "Undo", exact: true }).click();
   const restored = await readState(page);
   expect([restored.width, restored.height]).toEqual([1024, 1472]);

@@ -242,7 +242,10 @@
       setError(result.error);
       return;
     }
-    const imported = importPromptText(model, state, result.value, mode);
+    importJson(result.value, mode);
+  }
+  function importJson(text: string, mode: ImportMode = "all") {
+    const imported = importPromptText(model, state, text, mode);
     if (imported.isErr()) {
       setError(imported.error);
       return;
@@ -402,7 +405,7 @@
     let pasteReturn: Element | null = null;
     const keydown = (event: KeyboardEvent, target = event.target) => {
       // Host extensions paste into selected graph nodes from window capture listeners that run
-      // before ours, but they leave editable targets alone, so route image pastes through one.
+      // before ours, but they leave editable targets alone, so route editor pastes through one.
       if (pasteKey(event) && !event.defaultPrevented && !textTarget(target)) {
         pasteReturn = document.activeElement;
         pasteTarget.focus({ preventScroll: true });
@@ -447,8 +450,18 @@
       event.preventDefault();
       event.stopImmediatePropagation();
       if (invalidState !== null || activeDialog() || showJson) return;
-      const file = Array.from(event.clipboardData?.files ?? []).find((item) => item.type.startsWith("image/"));
-      if (file) void loadReference(file);
+      const clipboard = event.clipboardData;
+      if (!clipboard) return;
+      const file = Array.from(clipboard.files).find((item) => item.type.startsWith("image/"));
+      if (file) {
+        void loadReference(file);
+        return;
+      }
+      const text = clipboard.getData("text/plain");
+      if (text.trim()) {
+        showMenu = false;
+        importJson(text);
+      }
     };
     const captureClipboard = (event: ClipboardEvent) => {
       if (!node || inside(event)) return;
