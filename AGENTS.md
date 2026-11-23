@@ -21,6 +21,33 @@ This repo is a ComfyUI custom node package with Python nodes and a Svelte/TypeSc
 - `api.ts` holds HTTP requests built on `requestJson`, `store.ts` holds Svelte stores, and `state.ts` holds schemas and pure state transforms.
 - Reuse `ui/` components and `theme.css` classes (`primary`, `icon-button`, `with-icon`, `empty-state`, `sr-only`) before adding view-local equivalents.
 
+## User Data Access
+
+Code is open; the user's ComfyUI data is not. Paths below are relative to the ComfyUI root (`../../` from this package).
+
+### Allowed Without Asking
+
+- Any source code: this package, ComfyUI core, other custom nodes, and installed Python or Node packages.
+- This repository's test fixtures, preview fixtures, and mocks.
+- ComfyUI logs: `user/comfyui*.log`.
+- Model file names and safetensors tensor headers (keys, shapes, dtypes) under `models/`. Do not read weights or the `__metadata__` block, which can embed workflows or training data.
+- Files the user attaches or pastes into the conversation.
+
+### Requires Explicit Permission
+
+- Anything else under `user/`: workflows, templates, `comfy.settings.json`, `comfyui.db`, this package's presets and settings in `user/Neriss_ComfyNodes/`, and other custom nodes' data.
+- `input/`, `output/`, and `temp/`: images, masks, videos, and any embedded workflow or prompt metadata.
+- Directory listings of the folders above. File names count as user data.
+- Writing, moving, or deleting any user data.
+- Starting the real ComfyUI server, or opening its UI in a browser, since it loads the user's workflows and writes to `output/`. Unit tests, `pnpm run preview:editor`, and `pnpm run test:e2e` use mocks and stay allowed.
+
+### How to Handle It
+
+- Ask before access and name the exact files or folders and the reason. A grant covers only those paths for the current task; ask again for new paths or a new task.
+- Scope searches to code. Exclude `user/`, `input/`, `output/`, and `temp/` from repository-wide `grep`, `rg`, or `find` run from the ComfyUI root.
+- If user data shows up by accident, such as in a search hit or a stack trace, do not open it further or quote its content. Tell the user it appeared.
+- Reproduce bugs with synthetic fixtures instead of real workflows or images. Ask the user for a minimal sample when a fixture cannot reproduce the issue.
+
 ## Python
 
 ### Tooling Expectations
