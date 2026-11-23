@@ -31,7 +31,7 @@
     hasClipTargets,
     setBlockMultipliers,
   } from "./blocks";
-  import { loadLoraTargets } from "./api";
+  import { exportLora, loadLoraTargets } from "./api";
   import { loraChoices } from "./picker";
   import LoraPicker from "./LoraPicker.svelte";
   import FamilyChart from "./FamilyChart.svelte";
@@ -74,6 +74,8 @@
   let manifest = $state.raw<LoraManifest | null>(null);
   let loading = $state(true);
   let error = $state("");
+  let exporting = $state(false);
+  let exportError = $state("");
   let query = $state("");
   let changedOnly = $state(false);
   let activeFamily = $state<string | null>(null);
@@ -90,6 +92,13 @@
   const strengths = $derived(history.present);
   const mismatch = $derived(Object.keys(strengths.overrides).length > 0 && strengths.lora_name !== loraName);
   const disabled = $derived(mismatch || Boolean(stateError));
+  const canUseStrengths = $derived(
+    Boolean(manifest) &&
+      !loading &&
+      !disabled &&
+      strengthSchema.safeParse(modelStrength).success &&
+      strengthSchema.safeParse(clipStrength).success,
+  );
   const families = $derived(buildBlockFamilies(manifest?.targets ?? []));
   const allBlocks = $derived(families.flatMap((family) => family.blocks));
   const familyFilters = $derived([
@@ -246,13 +255,7 @@
     event.preventDefault();
   }
   function save() {
-    if (
-      !manifest ||
-      disabled ||
-      !strengthSchema.safeParse(modelStrength).success ||
-      !strengthSchema.safeParse(clipStrength).success
-    )
-      return;
+    if (!canUseStrengths) return;
     if (readWidgetValue(node, "lora_name") !== saved.selection) {
       error = "LoRA selection changed. Cancel and reopen the editor.";
       return;
@@ -263,6 +266,28 @@
     writeWidgetValue(node, "lora_name", loraName);
     findWidget(node, "lora_name")?.callback?.(loraName);
     onclose();
+  }
+  async function downloadLora() {
+    if (!canUseStrengths || exporting) return;
+    const name = loraName;
+    exporting = true;
+    exportError = "";
+    const result = await exportLora({ ...strengths, lora_name: name }, modelStrength, clipStrength);
+    exporting = false;
+    if (result.isErr()) {
+      exportError = formatAppError(result.error);
+      return;
+    }
+    const stem = name
+      .split(/[\\/]/)
+      .at(-1)
+      ?.replace(/\.safetensors$/i, "");
+    const url = URL.createObjectURL(result.value);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${stem || "lora"}-strengths.safetensors`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
   }
 </script>
 
@@ -308,10 +333,17 @@
         {#if overrideCount}<span class="dirty" role="status"
             >{overrideCount} override{overrideCount === 1 ? "" : "s"}</span
           >{/if}
+        <button
+          type="button"
+          disabled={!canUseStrengths || exporting}
+          aria-busy={exporting}
+          title="Download a LoRA with the current strengths baked in"
+          onclick={() => void downloadLora()}>{exporting ? "Exporting…" : "Export LoRA"}</button
+        >
         <button type="button" class="quiet" onclick={onclose}>Cancel</button><button
           type="submit"
           class="primary"
-          disabled={loading || !manifest || disabled}>Apply strengths</button
+          disabled={!canUseStrengths}>Apply strengths</button
         >
       </div>
     </header>
@@ -370,8 +402,9 @@
         {#if copied}<span class="copied" role="status">Copied</span>{/if}
       </div>
     </div>
-    {#if stateError || mismatch || error || clipboardError || manifest?.unsupported.length || (unused.length && !mismatch)}
+    {#if stateError || mismatch || error || exportError || clipboardError || manifest?.unsupported.length || (unused.length && !mismatch)}
       <div class="issues">
+        {#if exportError}<Alert message={exportError} />{/if}
         {#if clipboardError}<Alert message={clipboardError} />{/if}
         {#if stateError}<Alert message={stateError} action={{ label: "Reset overrides", onclick: reset }} />{/if}
         {#if mismatch}<Alert
@@ -558,6 +591,7 @@
   }
   .actions button {
     padding: 5px 9px;
+    white-space: nowrap;
   }
   .dirty {
     margin-right: 4px;
@@ -789,7 +823,9 @@
       flex-basis: 100%;
     }
     .actions {
-      margin-left: auto;
+      max-width: 100%;
+      flex-wrap: wrap;
+      justify-content: flex-end;
     }
     .details {
       max-height: 50dvh;

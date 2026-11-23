@@ -10,6 +10,7 @@ from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import TypedDict
 
 import comfy.lora
@@ -19,37 +20,37 @@ import comfy.utils
 import folder_paths
 import torch
 from aiohttp import web
+from aiohttp.helpers import content_disposition_header
 from comfy.model_patcher import ModelPatcher
 from comfy_api.latest import io
 from safetensors import SafetensorError, safe_open
+from safetensors.torch import save_file
 
 from ..shared import EditorError, Err, Ok, Result
-from ..shared.json_store import parse_json, store_response
+from ..shared.json_store import parse_json, request_json, store_response
 from ..shared.limits import finite_number
 from ..shared.server import routes
 
 DEFAULT_STATE = '{"version":1,"lora_name":"","overrides":{}}'
 MAX_TARGETS = 30_000
 MAX_NAME = 2048
+LORA_WEIGHT_SUFFIXES = (
+    (".lora_up.weight", ".lora_down.weight"),
+    ("_lora.up.weight", "_lora.down.weight"),
+    (".lora_B.weight", ".lora_A.weight"),
+    (".lora.up.weight", ".lora.down.weight"),
+    (".lora_B", ".lora_A"),
+    (".lora_linear_layer.up.weight", ".lora_linear_layer.down.weight"),
+    (".lora_B.default.weight", ".lora_A.default.weight"),
+)
+# Comfy's text-encoder aliases are namespaced even when model targets use bare paths.
+CLIP_TARGET = re.compile(r"^(?:lora_te\d*_|lora_prior_te_|text_encoders?\.|text_encoder_\d+\.)")
 # Format suffixes, not model-family/block tables. Longest suffix wins.
 ADAPTER_SUFFIXES = tuple(
     sorted(
         (
-            ".lora_up.weight",
-            ".lora_down.weight",
+            *(suffix for pair in LORA_WEIGHT_SUFFIXES for suffix in pair),
             ".lora_mid.weight",
-            "_lora.up.weight",
-            "_lora.down.weight",
-            ".lora_B.weight",
-            ".lora_A.weight",
-            ".lora.up.weight",
-            ".lora.down.weight",
-            ".lora_B",
-            ".lora_A",
-            ".lora_linear_layer.up.weight",
-            ".lora_linear_layer.down.weight",
-            ".lora_B.default.weight",
-            ".lora_A.default.weight",
             ".hada_w1_a",
             ".hada_w1_b",
             ".hada_w2_a",
@@ -132,7 +133,15 @@ def parse_strength_state(content: str) -> Result[StrengthState, EditorError]:
     parsed = parse_json(content)
     if isinstance(parsed, Err):
         return parsed
-    value = parsed.value
+    return validate_strength_state(parsed.value)
+
+
+def strength_value(value: object) -> float | None:
+    number = finite_number(value)
+    return number if number is not None and -20 <= number <= 20 else None
+
+
+def validate_strength_state(value: object) -> Result[StrengthState, EditorError]:
     if not isinstance(value, dict):
         return Err(EditorError("Invalid LoRA strength state"))
     version = value.get("version")
@@ -145,8 +154,8 @@ def parse_strength_state(content: str) -> Result[StrengthState, EditorError]:
         return Err(EditorError("Too many LoRA strength overrides"))
     normalized: dict[str, float] = {}
     for key, strength in overrides.items():
-        number = finite_number(strength)
-        if not isinstance(key, str) or not key or len(key) > MAX_NAME or number is None or not -20 <= number <= 20:
+        number = strength_value(strength)
+        if not isinstance(key, str) or not key or len(key) > MAX_NAME or number is None:
             return Err(EditorError("LoRA multipliers must be finite numbers between -20 and 20"))
         normalized[key] = number
     return Ok(StrengthState(name, normalized))
@@ -178,6 +187,101 @@ async def lora_targets(request: web.Request) -> web.Response:
     if isinstance(result, Err):
         return store_response(result, 400)
     return web.json_response(result.value)
+
+
+def export_lora(
+    state: StrengthState, model_strength: float, clip_strength: float, destination: Path
+) -> Result[None, EditorError]:
+    path = lora_path(state.lora_name)
+    if isinstance(path, Err):
+        return path
+    try:
+        with safe_open(str(path.value), framework="pt", device="cpu") as file:
+            manifest = discover_targets(file.keys(), state.lora_name)
+            if isinstance(manifest, Err):
+                return manifest
+            targets = manifest.value["targets"]
+            if not targets:
+                return Err(EditorError("Export requires at least one standard LoRA weight pair"))
+            remaining = set(file.keys())
+            weights: dict[str, torch.Tensor] = {}
+            for target in targets:
+                pairs = [
+                    (target + up, target + down)
+                    for up, down in LORA_WEIGHT_SUFFIXES
+                    if target + up in remaining and target + down in remaining
+                ]
+                if len(pairs) != 1:
+                    return Err(EditorError(f"Export requires one standard LoRA weight pair for {target}"))
+                up_key, down_key = pairs[0]
+                up, down = file.get_tensor(up_key), file.get_tensor(down_key)
+                if up.ndim < 2 or down.ndim < 2 or not down.shape[0] or math.prod(up.shape[1:]) != down.shape[0]:
+                    return Err(EditorError(f"Invalid LoRA weight shapes for {target}"))
+                weights[up_key], weights[down_key] = up, down
+                remaining.difference_update((up_key, down_key))
+
+                alpha_key = f"{target}.alpha"
+                alpha = file.get_tensor(alpha_key) if alpha_key in remaining else None
+                alpha_value = float(down.shape[0])
+                if alpha is not None:
+                    remaining.remove(alpha_key)
+                    value = alpha.item() if alpha.numel() == 1 else None
+                    if not isinstance(value, int | float) or isinstance(value, bool) or not math.isfinite(value):
+                        return Err(EditorError(f"Invalid LoRA alpha for {target}"))
+                    alpha_value = float(value)
+                global_strength = clip_strength if CLIP_TARGET.match(target) else model_strength
+                effective = global_strength * target_multiplier(target, state.overrides)
+                if effective != 1.0:
+                    scaled = effective * alpha_value
+                    if not math.isfinite(scaled):
+                        return Err(EditorError(f"Export strength overflows the LoRA alpha for {target}"))
+                    # Comfy reads alpha as a Python scalar. Keep the precision of the applied strength.
+                    weights[alpha_key] = torch.tensor(scaled, dtype=torch.float64)
+                elif alpha is not None:
+                    weights[alpha_key] = alpha
+            if remaining:
+                return Err(EditorError(f"Export supports standard LoRA pairs. Unsupported tensor: {min(remaining)}"))
+            save_file(weights, destination)
+    except SafetensorError:
+        return Err(EditorError("Could not read or serialize the safetensors LoRA", status=400))
+    except OSError:
+        return Err(EditorError("Could not read the LoRA or write the download", status=500))
+    return Ok(None)
+
+
+@routes.post("/neriss_comfynodes/lora/export")
+async def lora_export(request: web.Request) -> web.StreamResponse:
+    body = await request_json(request)
+    if isinstance(body, Err):
+        return store_response(body, 400)
+    if not isinstance(body.value, dict):
+        return store_response(Err(EditorError("Invalid LoRA export request")), 400)
+    state = validate_strength_state(body.value.get("state"))
+    if isinstance(state, Err):
+        return store_response(state, 400)
+    model_strength = strength_value(body.value.get("strength_model"))
+    clip_strength = strength_value(body.value.get("strength_clip"))
+    if model_strength is None or clip_strength is None:
+        return store_response(Err(EditorError("Global LoRA strengths must be finite numbers between -20 and 20")), 400)
+
+    filename = Path(state.value.lora_name.replace("\\", "/")).stem + "-strengths.safetensors"
+    with TemporaryDirectory(prefix="neriss-lora-") as directory:
+        destination = Path(directory) / "export.safetensors"
+        result = await asyncio.to_thread(export_lora, state.value, model_strength, clip_strength, destination)
+        if isinstance(result, Err):
+            return store_response(result, 400)
+        with destination.open("rb") as file:
+            response = web.Response(
+                body=file,
+                content_type="application/octet-stream",
+                headers={
+                    "Content-Disposition": content_disposition_header("attachment", filename=filename),
+                    "Cache-Control": "no-store",
+                },
+            )
+            await response.prepare(request)
+            await response.write_eof()
+    return response
 
 
 def bias_patch_key(destination: object) -> Result[object, EditorError]:
@@ -300,7 +404,7 @@ class NerissLoraBlockStrengthEditor(io.ComfyNode):
                 block_execution="LoRA selection changed. Open the strength editor and reset overrides for this LoRA."
             )
         for strength in (strength_model, strength_clip):
-            if not math.isfinite(strength) or not -20 <= strength <= 20:
+            if strength_value(strength) is None:
                 return io.NodeOutput(block_execution="Global LoRA strengths must be finite numbers between -20 and 20")
         path = lora_path(lora_name)
         if isinstance(path, Err):

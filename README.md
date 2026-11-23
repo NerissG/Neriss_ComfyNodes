@@ -107,6 +107,7 @@ After cloning the repo, restart ComfyUI and refresh the browser.
 > - Blocks are read from the LoRA itself, so it works with any model family.
 > - Each multiplier scales the global MODEL/TE strength. `0` turns a block off; negative values are allowed.
 > - Changes take effect when you click **Apply strengths**.
+> - **Export LoRA** downloads a new `-strengths.safetensors` from the editor's current values for standard LoRA pairs. Load it on the same base model at strength `1.0`.
 > - Copy and paste buttons buttons to export or import as JSON to the clipboard.
 > - If a LoRA doesn't seem to apply, check the `report` output.
 >

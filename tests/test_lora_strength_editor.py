@@ -13,7 +13,7 @@ import torch
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 from comfy_test_support import lora
-from safetensors.torch import save_file
+from safetensors.torch import load, save_file
 
 
 def adapter(target: str, format_name: str = "regular") -> dict[str, torch.Tensor]:
@@ -52,6 +52,7 @@ def make_clip() -> lora.comfy.sd.CLIP:
         clip.cond_stage_model, load_device=torch.device("cpu"), offload_device=torch.device("cpu")
     )
     clip.tokenizer = None
+    clip.tokenizer_metadata = {}
     clip.tokenizer_options = {}
     clip.layer_idx = None
     clip.use_clip_schedule = False
@@ -315,3 +316,86 @@ class RouteTests(unittest.IsolatedAsyncioTestCase):
                     path.write_bytes(b"not safetensors")
                     response = await client.get("/neriss_comfynodes/lora/targets", params={"lora_name": path.name})
                     self.assertEqual(response.status, 400)
+
+    async def test_export_matches_editor_patches_in_the_standard_comfy_loader(self) -> None:
+        model_target = "diffusion_model.blocks.0.q"
+        zero_target = "diffusion_model.blocks.0.k"
+        clip_target = "text_encoders.encoder"
+        model_weights = adapter(model_target, "peft")
+        model_weights[f"{model_target}.lora_B.weight"] = model_weights[f"{model_target}.lora_B.weight"].repeat(1, 2)
+        model_weights[f"{model_target}.lora_A.weight"] = model_weights[f"{model_target}.lora_A.weight"].repeat(2, 1)
+        weights = {
+            **model_weights,
+            **adapter(zero_target),
+            **adapter(clip_target, "default"),
+            f"{clip_target}.alpha": torch.tensor(2, dtype=torch.int32),
+        }
+        state = {
+            "version": 1,
+            "lora_name": "nested/demo.safetensors",
+            "overrides": {
+                "diffusion_model.blocks.0": 0.5,
+                zero_target: 0,
+                clip_target: -1.5,
+            },
+        }
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "demo.safetensors"
+            save_file(weights, path)
+            original = path.read_bytes()
+            app = web.Application()
+            app.add_routes(lora.routes)
+            async with TestClient(TestServer(app)) as client:
+                with (
+                    patch.object(lora.folder_paths, "get_filename_list", return_value=[state["lora_name"]]),
+                    patch.object(lora.folder_paths, "get_full_path", return_value=str(path)),
+                ):
+                    response = await client.post(
+                        "/neriss_comfynodes/lora/export",
+                        json={"state": state, "strength_model": 0.8, "strength_clip": 0.6},
+                    )
+                    self.assertEqual(response.status, 200)
+                    self.assertIn("demo-strengths.safetensors", response.headers["Content-Disposition"])
+                    exported = load(await response.read())
+                    self.assertEqual(path.read_bytes(), original)
+                    model, clip = make_model(), make_clip()
+                    edited_model, edited_clip, _ = lora.NerissLoraBlockStrengthEditor.execute(
+                        model, state["lora_name"], 0.8, 0.6, json.dumps(state), clip
+                    ).result
+
+            for key in weights.keys() - {f"{clip_target}.alpha"}:
+                torch.testing.assert_close(exported[key], weights[key], rtol=0, atol=0)
+
+            loaded_model, loaded_clip = lora.comfy.sd.load_lora_for_models(model, clip, exported, 1.0, 1.0)
+            for target in (model_target, zero_target):
+                key = f"{target}.weight"
+                torch.testing.assert_close(
+                    loaded_model.patch_weight_to_device(key, return_weight=True),
+                    edited_model.patch_weight_to_device(key, return_weight=True),
+                )
+            torch.testing.assert_close(
+                loaded_clip.patcher.patch_weight_to_device("encoder.weight", return_weight=True),
+                edited_clip.patcher.patch_weight_to_device("encoder.weight", return_weight=True),
+            )
+
+    async def test_export_rejects_invalid_requests_and_dora(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "demo.safetensors"
+            save_file({**adapter("blocks.0.q"), "blocks.0.q.dora_scale": torch.ones(2)}, path)
+            app = web.Application()
+            app.add_routes(lora.routes)
+            async with TestClient(TestServer(app)) as client:
+                with (
+                    patch.object(lora.folder_paths, "get_filename_list", return_value=[path.name]),
+                    patch.object(lora.folder_paths, "get_full_path", return_value=str(path)),
+                ):
+                    state = {"version": 1, "lora_name": path.name, "overrides": {}}
+                    request = {"state": state, "strength_model": 1, "strength_clip": 1}
+                    for payload, error in (
+                        ({**request, "strength_clip": True}, "Global LoRA strengths"),
+                        ({**request, "state": {**state, "lora_name": "../demo.safetensors"}}, "installed"),
+                        (request, "dora_scale"),
+                    ):
+                        response = await client.post("/neriss_comfynodes/lora/export", json=payload)
+                        self.assertEqual(response.status, 400)
+                        self.assertIn(error, (await response.json())["error"])

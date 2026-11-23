@@ -48,6 +48,31 @@ export function jsonBody(value: unknown): RequestInit {
   return { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(value) };
 }
 
+function readResponseText(response: Response, subject: string) {
+  return ResultAsync.fromPromise(response.text(), (cause) =>
+    comfyErrors.runtime(`Could not read ${subject}`, { status: response.status }, cause),
+  );
+}
+
+export function requestResponse(
+  route: string,
+  subject: string,
+  options?: RequestInit,
+  transport: Transport = fetchComfy,
+): ResultAsync<Response, AppError> {
+  return ResultAsync.fromPromise(transport(route, options), (cause) =>
+    comfyErrors.runtime(`Could not reach ${subject}`, undefined, cause),
+  ).andThen((response) =>
+    response.ok
+      ? ok(response)
+      : readResponseText(response, subject).andThen((text) => {
+          const body = errorBodySchema.safeParse(parseJson(text).unwrapOr(null));
+          const message = body.success ? body.data.error : text.trim() || `Request for ${subject} failed`;
+          return err(comfyErrors.runtime(message, { status: response.status }));
+        }),
+  );
+}
+
 /**
  * Sends a request to a Neriss endpoint and validates its JSON response. Failed responses carry their
  * HTTP status in `details.status` and use the server's `{ error }` message, or the raw body text.
@@ -59,19 +84,9 @@ export function requestJson<T>(
   options?: RequestInit,
   transport: Transport = fetchComfy,
 ): ResultAsync<T, AppError> {
-  return ResultAsync.fromPromise(transport(route, options), (cause) =>
-    comfyErrors.runtime(`Could not reach ${subject}`, undefined, cause),
-  ).andThen((response) =>
-    ResultAsync.fromPromise(response.text(), (cause) =>
-      comfyErrors.runtime(`Could not read ${subject}`, { status: response.status }, cause),
-    ).andThen((text): Result<T, AppError> => {
-      const json = parseJson(text);
-      if (!response.ok) {
-        const body = errorBodySchema.safeParse(json.unwrapOr(null));
-        const message = body.success ? body.data.error : text.trim() || `Request for ${subject} failed`;
-        return err(comfyErrors.runtime(message, { status: response.status }));
-      }
-      const parsed = schema.safeParse(json.unwrapOr(undefined));
+  return requestResponse(route, subject, options, transport).andThen((response) =>
+    readResponseText(response, subject).andThen((text): Result<T, AppError> => {
+      const parsed = schema.safeParse(parseJson(text).unwrapOr(undefined));
       return parsed.success
         ? ok(parsed.data)
         : err(comfyErrors.runtime(`Invalid ${subject} response`, { issues: parsed.error.issues }, parsed.error));

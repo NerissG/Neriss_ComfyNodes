@@ -163,6 +163,47 @@ test("cancelling a header LoRA selection leaves the node and its saved strengths
   await expect(page.getByTestId("lora-state")).toHaveText(saved);
 });
 
+test("exports the current LoRA draft and lets the user retry a failed export", async ({ page }) => {
+  await page.route(endpoint, (route) => {
+    const name = new URL(route.request().url()).searchParams.get("lora_name");
+    return route.fulfill({
+      json: { lora_name: name, targets: [...targets, "text_encoder_2.text_model.layer"], unsupported: [] },
+    });
+  });
+  let attempts = 0;
+  await page.route("**/neriss_comfynodes/lora/export", async (route) => {
+    expect(route.request().method()).toBe("POST");
+    expect(route.request().postDataJSON()).toEqual({
+      state: { version: 1, lora_name: "other.safetensors", overrides: { [block0]: -0.5 } },
+      strength_model: 0.75,
+      strength_clip: 0.25,
+    });
+    attempts += 1;
+    if (attempts === 1) {
+      await route.fulfill({ status: 400, json: { error: "Could not export this LoRA" } });
+      return;
+    }
+    await route.fulfill({ contentType: "application/octet-stream", body: "mock download" });
+  });
+  const saved = JSON.stringify({ version: 1, lora_name: "demo.safetensors", overrides: {} });
+  await page.goto(`/preview/index.html?lora=1&loraState=${encodeURIComponent(saved)}`);
+  const modal = page.getByRole("dialog", { name: "LoRA block strength editor" });
+  await selectLora(modal, "other.safetensors");
+  await setBlock(modal, block0, "-0.5");
+  await setNumber(modal.getByRole("spinbutton", { name: "MODEL strength" }), "0.75");
+  await setNumber(modal.getByRole("spinbutton", { name: "CLIP strength" }), "0.25");
+  const button = modal.getByRole("button", { name: "Export LoRA" });
+  await button.click();
+  await expect(modal.getByRole("alert")).toContainText("Could not export this LoRA");
+  const download = page.waitForEvent("download");
+  await button.click();
+  expect((await download).suggestedFilename()).toBe("other-strengths.safetensors");
+  await expect(modal.getByRole("alert")).toHaveCount(0);
+  await expect(modal).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "Preview LoRA", exact: true })).toHaveValue("demo.safetensors");
+  await expect(page.getByTestId("lora-state")).toHaveText(saved);
+});
+
 test("late target responses cannot replace the newly selected LoRA", async ({ page }) => {
   let releaseOther: (() => void) | undefined;
   let markOtherStarted: (() => void) | undefined;

@@ -173,5 +173,5 @@ export function chartRange(values: number[]): { lo: number; hi: number } {
 }
 
 export function hasClipTargets(targets: string[]): boolean {
-  return targets.some((target) => /^(?:lora_te\d*_|lora_prior_te_|text_encoders?\.)/.test(target));
+  return targets.some((target) => /^(?:lora_te\d*_|lora_prior_te_|text_encoders?\.|text_encoder_\d+\.)/.test(target));
 }
