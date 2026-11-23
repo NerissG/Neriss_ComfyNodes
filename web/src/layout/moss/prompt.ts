@@ -4,7 +4,7 @@ import { editorErrors, type AppError } from "@/errors";
 import { fromCentralized, toCentralized } from "@/layout/geometry";
 import { createRegion, hasRegionBbox, type EditorState } from "@/layout/state";
 import { regionOutline, regionTitle } from "@/layout/regions";
-import { mossPromptSchema, type MossPrompt } from "./schema";
+import { mossImportSchema, type MossPrompt } from "./schema";
 
 export function buildMossPrompt(state: EditorState): PromptResult<MossPrompt, AppError> {
   const regions = regionOutline(state.elements).map(({ region }) => region);
@@ -35,24 +35,31 @@ export function buildMossPrompt(state: EditorState): PromptResult<MossPrompt, Ap
 
 export function importMossText(state: EditorState, text: string) {
   return parseBoundedJson(text).andThen((value) => {
-    const parsed = mossPromptSchema.safeParse(value);
+    const parsed = mossImportSchema.safeParse(value);
     if (!parsed.success) {
       const explanation = parsed.error.issues
         .map((issue) => `${issue.path.join(".") || "prompt"}: ${issue.message}`)
         .join("; ");
       return err(editorErrors.runtime(`Invalid MOSS layout prompt: ${explanation}`, { issues: parsed.error.issues }));
     }
-    const elements = parsed.data.items.map((item) => ({
-      ...createRegion(item.label === "text" ? "text" : "obj", fromCentralized(item.bbox, state.width, state.height)),
-      desc: item.caption,
-      label: item.label,
-      text: item.text ?? "",
-      color_palette: item.palette ?? [],
-    }));
+    const prompt = parsed.data;
+    const elements = prompt.items.map((item) => {
+      const bbox =
+        prompt.bbox_coord_space === "abs_centralized"
+          ? fromCentralized(item.bbox, state.width, state.height)
+          : item.bbox;
+      return {
+        ...createRegion(item.label === "text" ? "text" : "obj", bbox),
+        desc: item.caption,
+        label: item.label,
+        text: item.text ?? "",
+        color_palette: item.palette ?? [],
+      };
+    });
     return ok({
       ...state,
-      high_level_description: parsed.data.summary.caption,
-      moss_meta: parsed.data.summary.meta,
+      high_level_description: prompt.summary.caption,
+      moss_meta: prompt.summary.meta,
       elements,
       selected_region_id: null,
     });

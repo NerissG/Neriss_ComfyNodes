@@ -36,6 +36,26 @@ test("MOSS example imports and exports exactly, including text and negative coor
   assert.deepEqual(buildMossPrompt(result.value), sample);
 });
 
+test("MOSS imports normalized XYXY boxes at the same relative position on different canvases", () => {
+  const summary = { meta: ["panorama"], canvas: "single", caption: "Visitors on a mountain ridge" };
+  const item = { label: "character", caption: "Visitors", bbox: [289, 635, 849, 1000], palette: ["#FFFFFF"] };
+  const text = JSON.stringify({ summary, items: [item] });
+  for (const [width, height, bbox] of [
+    [2000, 1000, [135, -422, 500, 698]],
+    [1000, 2000, [270, -211, 1000, 349]],
+  ]) {
+    const imported = importMossText({ ...createInitialState(), width, height }, text)._unsafeUnwrap();
+    assert.deepEqual(imported.elements[0].bbox, [635, 289, 1000, 849]);
+    assert.deepEqual([imported.width, imported.height], [width, height]);
+    assert.deepEqual(buildMossPrompt(imported), {
+      summary,
+      items: [{ ...item, bbox }],
+      bbox_coord_space: "abs_centralized",
+      bbox_format: "yxyx",
+    });
+  }
+});
+
 test("MOSS element palettes survive import, editing, saved state, and export", async () => {
   const prompt = JSON.parse(
     await readFile(new URL("../../tests/fixtures/moss_palette_layout.json", import.meta.url), "utf8"),
@@ -212,6 +232,28 @@ test("invalid coordinates and prompts for another format are rejected", () => {
   const result = importMossText(state, JSON.stringify(missingText));
   assert.equal(result.isErr(), true);
   assert.match(result.error.message, /items.0.text/);
+});
+
+test("MOSS validates normalized box bounds, corner order, and text regions", () => {
+  const state = createInitialState();
+  const prompt = { summary: sample.summary, items: [{ label: "object", caption: "Region", bbox: [0, 0, 1000, 1000] }] };
+  for (const bbox of [
+    [-1, 0, 1000, 1000],
+    [0, 0, 1000, 1001],
+    [500, 0, 499, 1000],
+    [0, 500, 1000, 499],
+  ]) {
+    const result = importMossText(state, JSON.stringify({ ...prompt, items: [{ ...prompt.items[0], bbox }] }));
+    assert.equal(result.isErr(), true);
+    assert.match(result.error.message, /items.0.bbox/);
+  }
+  const textRegion = importMossText(
+    state,
+    JSON.stringify({ ...prompt, items: [{ ...prompt.items[0], label: "text" }] }),
+  );
+  assert.equal(textRegion.isErr(), true);
+  assert.match(textRegion.error.message, /items.0.text/);
+  assert.equal(importMossText(state, JSON.stringify({ ...prompt, bbox_format: "yxyx" })).isErr(), true);
 });
 
 test("Ideogram retains its schema, style, palettes, and literal text", () => {

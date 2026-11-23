@@ -1570,6 +1570,25 @@ for (const model of ["moss", "ideogram"] satisfies EditorModel[]) {
   });
 }
 
+test("moss: Paste JSON places normalized XYXY boxes on the canvas and supports undo", async ({ page }) => {
+  await openEditor(page, "moss", true);
+  const original = await readState(page);
+  const prompt = {
+    summary: { meta: ["panorama"], canvas: "single", caption: "A church on a mountain ridge" },
+    items: [{ label: "object", caption: "Stone church", bbox: [376, 269, 638, 996] }],
+  };
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.evaluate((text) => navigator.clipboard.writeText(text), JSON.stringify(prompt));
+  await page.getByRole("button", { name: "Import and export options", exact: true }).hover();
+  await page.getByRole("button", { name: "Paste JSON", exact: true }).click();
+  await expect(page.locator(".region-item")).toHaveCount(1);
+  const imported = await readState(page);
+  expect(imported.elements[0]).toMatchObject({ desc: "Stone church", bbox: [269, 376, 996, 638] });
+  expect(imported.high_level_description).toBe(prompt.summary.caption);
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
+  expect(await readState(page)).toEqual(original);
+});
+
 test("import/export supports keyboard focus, Escape and opening again with ArrowDown", async ({ page }) => {
   await openEditor(page);
   const trigger = page.getByRole("button", { name: "Import and export options", exact: true });
